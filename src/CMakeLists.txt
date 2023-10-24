@@ -1,6 +1,12 @@
-set(AnalyzerSources SimplePass.cpp Sarif.cpp)
+set(AnalyzerSources Sarif.cpp
+        SimplePass.cpp
+        ../include/SimplePass.h
+        DataDependenceGraph.cpp
+        ../include/DataDependenceGraph.h)
 
-add_library(Analyzer SHARED ${AnalyzerSources})
+add_library(Analyzer SHARED ${AnalyzerSources}
+        ../include/SimplePass.h
+        ../include/DataDependenceGraph.h)
 
 find_package(LLVM 12 REQUIRED)
 

@@ -1,4 +1,5 @@
 #include "SimplePass.h"
+#include "DataDependenceGraph.h"
 
 std::string SimplePass::getFunctionLocation(const Function *Func) {
   for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
@@ -63,6 +64,18 @@ PreservedAnalyses SimplePass::run(Module &M, ModuleAnalysisManager &) {
 void SimplePass::analyze(Module &M) {
   if (M.getFunctionList().empty()) {
     return;
+  }
+
+  for (auto &Func : M.getFunctionList()) {
+    if (Func.isDeclarationForLinker()) {
+      continue;
+    }
+    errs() << "Func: " << Func.getName() << "\n";
+    DataFlowGraph DFG;
+    DFG.collectDependencies(&Func);
+    DFG.MallocFreePathChecker();
+    DFG.print();
+    errs() << "-----------------------\n";
   }
 
   Sarif GenSarif;
