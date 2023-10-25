@@ -22,7 +22,7 @@ for line in data:
     graph.add_node(sourceNode)
     destinationNode = pydot.Node(destination, label=destination,
                                  style="filled", shape="rect")
-    graph.add_node(sourceNode)
+    graph.add_node(destinationNode)
 
     edge = pydot.Edge(sourceNode, destinationNode)
     graph.add_edge(edge)

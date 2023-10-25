@@ -70,12 +70,19 @@ void SimplePass::analyze(Module &M) {
     if (Func.isDeclarationForLinker()) {
       continue;
     }
-    errs() << "Func: " << Func.getName() << "\n";
-    DataFlowGraph DFG;
-    DFG.collectDependencies(&Func);
-    DFG.MallocFreePathChecker();
-    DFG.print();
-    errs() << "-----------------------\n";
+//    errs() << "Func: " << Func.getName() << "\n";
+    Analyzer analyzer;
+    analyzer.collectDependencies(&Func);
+    analyzer.constructFlow(&Func);
+
+    analyzer.MallocFreePathChecker();
+//    analyzer.printMap("flow");
+//    errs() << "-----------------------\n";
+//    analyzer.printMap("back_dep");
+//    errs() << "-----------------------\n";
+//    analyzer.printMap("dep");
+//    errs() << "-----------------------\n";
+//    errs() << "-----------------------\n";
   }
 
   Sarif GenSarif;

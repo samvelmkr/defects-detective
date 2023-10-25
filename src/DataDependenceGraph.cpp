@@ -4,19 +4,21 @@
 
 namespace llvm {
 
-void DataFlowGraph::addEdge(Instruction *Source, Instruction *Destination) {
-  DependencyMap[Source].insert(Destination);
+void Analyzer::addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
+                       Instruction *Source, Instruction *Destination) {
+  Map[Source].insert(Destination);
 }
 
-bool DataFlowGraph::hasEdge(Instruction *Source, Instruction *Destination) {
-  auto sourceIter = DependencyMap.find(Source);
-  if (sourceIter != DependencyMap.end()) {
+bool Analyzer::hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
+                       Instruction *Source, Instruction *Destination) {
+  auto sourceIter = Map.find(Source);
+  if (sourceIter != Map.end()) {
     return sourceIter->second.find(Destination) != sourceIter->second.end();
   }
   return false;
 }
 
-void DataFlowGraph::collectDependencies(Function *Func) {
+void Analyzer::collectDependencies(Function *Func) {
 
   for (auto &BB : *Func) {
     for (auto &Inst : BB) {
@@ -38,14 +40,18 @@ void DataFlowGraph::collectDependencies(Function *Func) {
             if (!isa<Constant>(firstOp)) {
               auto *fromInst = dyn_cast<Instruction>(firstOp);
               auto *toInst = dyn_cast<Instruction>(secondOp);
-              if (!hasEdge(fromInst, toInst)) {
-                addEdge(fromInst, toInst);
+              if (!hasEdge(DependencyMap, fromInst, toInst)) {
+                addEdge(DependencyMap, fromInst, toInst);
               }
+//              if (!hasEdge(BackwardDependencyMap, toInst, fromInst)) {
+//                addEdge(BackwardDependencyMap, toInst, fromInst);
+//              }
               continue;
             }
           }
 
-          addEdge(&Inst, DependentInst);
+          addEdge(DependencyMap, &Inst, DependentInst);
+//          addEdge(BackwardDependencyMap, DependentInst, &Inst);
         }
       }
     }
@@ -66,17 +72,53 @@ void DataFlowGraph::collectDependencies(Function *Func) {
 //    }
 //  }
 }
-void DataFlowGraph::print() {
-  for (auto &Pair : DependencyMap) {
-    Instruction *To = Pair.first;
-    std::unordered_set<Instruction *> Dependencies = Pair.second;
 
-    for (Instruction *Dependency : Dependencies) {
-      errs() << *To << "-->" << *Dependency << "\n";
+void Analyzer::createIntraBBEdges(BasicBlock &BB) {
+  for (auto &Inst : BB) {
+    if (Inst.isDebugOrPseudoInst()) {
+      continue;
+    }
+    Instruction *nextInst = Inst.getNextNonDebugInstruction();
+    if (nextInst) {
+      addEdge(FlowMap, &Inst, nextInst);
     }
   }
 }
-bool DataFlowGraph::MallocFreePathChecker() {
+void Analyzer::constructFlow(Function *Func) {
+  for (auto &BB : *Func) {
+    createIntraBBEdges(BB);
+    Instruction *lastInst = &BB.back();
+
+    // TODO: is there any jump instructions except 'br'?
+    if (lastInst->getOpcode() == Instruction::Br) {
+      auto *Branch = dyn_cast<BranchInst>(lastInst);
+      if (Branch->isConditional()) {
+        addEdge(FlowMap, lastInst, Branch->getSuccessor(0)->getFirstNonPHIOrDbg());
+        addEdge(FlowMap, lastInst, Branch->getSuccessor(1)->getFirstNonPHIOrDbg());
+      } else if (Branch->isUnconditional()) {
+        addEdge(FlowMap, lastInst, Branch->getSuccessor(0)->getFirstNonPHIOrDbg());
+      }
+    }
+  }
+}
+
+void Analyzer::printMap(const std::string &map) {
+  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *Map = nullptr;
+  if (map == "flow") {
+    Map = &FlowMap;
+  } else {
+    Map = &DependencyMap;
+  }
+  for (auto &Pair : *Map) {
+    Instruction *To = Pair.first;
+    std::unordered_set<Instruction *> Successors = Pair.second;
+
+    for (Instruction *Successor : Successors) {
+      errs() << *To << "-->" << *Successor << "\n";
+    }
+  }
+}
+bool Analyzer::MallocFreePathChecker() {
   if (callInstructions.empty()) {
     return true;
   }
@@ -93,7 +135,7 @@ bool DataFlowGraph::MallocFreePathChecker() {
 
   return false;
 }
-bool DataFlowGraph::isMallocCall(Instruction *Inst) {
+bool Analyzer::isMallocCall(Instruction *Inst) {
   if (auto *callInst = dyn_cast<CallInst>(Inst)) {
     Function *calledFunc = callInst->getCalledFunction();
     return calledFunc->getName() == "malloc";
@@ -101,26 +143,17 @@ bool DataFlowGraph::isMallocCall(Instruction *Inst) {
   return false;
 }
 
-bool DataFlowGraph::hasMallocFreePath(Instruction *startInst) {
+bool Analyzer::buildDependencyPath(Instruction *from, Instruction *to) {
   std::unordered_set<Instruction *> visitedNodes;
   std::stack<Instruction *> dfsStack;
-  dfsStack.push(startInst);
+  dfsStack.push(from);
 
   while (!dfsStack.empty()) {
     Instruction *currInst = dfsStack.top();
     dfsStack.pop();
 
-    //    if (DependencyMap[currInst].empty()) {
-    errs() << "############# CURR: " << *currInst << "\n";
-//    }
-
-    if (isFreeCall(currInst)) {
-      continue;
-    }
-
-    // Reached "ret" without encountering a "free" call
-    if (isa<ReturnInst>(currInst)) {
-      return false;
+    if (currInst == to) {
+      return true;
     }
 
     visitedNodes.insert(currInst);
@@ -133,12 +166,58 @@ bool DataFlowGraph::hasMallocFreePath(Instruction *startInst) {
   }
   return false;
 }
-bool DataFlowGraph::isFreeCall(Instruction *Inst) {
+
+bool Analyzer::hasMallocFreePath(Instruction *startInst) {
+  std::unordered_set<Instruction *> visitedNodes;
+  std::stack<Instruction *> dfsStack;
+  dfsStack.push(startInst);
+
+  while (!dfsStack.empty()) {
+    Instruction *currInst = dfsStack.top();
+    dfsStack.pop();
+
+//    errs() << "############# CURR: " << *currInst << "\n";
+
+    if (isFreeCall(currInst)) {
+      errs() << "Free inst: " << *currInst << "\n"
+             << "\t op1: " << *currInst->getOperand(0) << "\n";
+
+      if (!buildDependencyPath(startInst, currInst)) {
+        return false;
+      }
+      continue;
+    }
+
+    // Reached "ret" without encountering a "free" call
+    if (isa<ReturnInst>(currInst)) {
+      errs() << "Ret inst: " << *currInst << "\n"
+             << "\t op1: " << *currInst->getOperand(0) << "\n";
+      return false;
+    }
+
+    visitedNodes.insert(currInst);
+
+    for (Instruction *nextInst : FlowMap[currInst]) {
+      if (visitedNodes.find(nextInst) == visitedNodes.end()) {
+        // Check if the dependency is relevant to memory allocation and deallocation
+        if (isRelevantToMemoryManagement(nextInst)) {
+          dfsStack.push(nextInst);
+        }
+      }
+    }
+  }
+  return true;
+}
+bool Analyzer::isFreeCall(Instruction *Inst) {
   if (auto *callInst = dyn_cast<CallInst>(Inst)) {
     Function *calledFunc = callInst->getCalledFunction();
     return calledFunc->getName() == "free";
   }
   return false;
 }
+bool Analyzer::isRelevantToMemoryManagement(Instruction *Inst) {
+  return Inst->getType()->isPointerTy();
+}
+
 
 };
