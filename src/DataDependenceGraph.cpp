@@ -43,15 +43,15 @@ void Analyzer::collectDependencies(Function *Func) {
               if (!hasEdge(DependencyMap, fromInst, toInst)) {
                 addEdge(DependencyMap, fromInst, toInst);
               }
-//              if (!hasEdge(BackwardDependencyMap, toInst, fromInst)) {
-//                addEdge(BackwardDependencyMap, toInst, fromInst);
-//              }
+              if (!hasEdge(BackwardDependencyMap, toInst, fromInst)) {
+                addEdge(BackwardDependencyMap, toInst, fromInst);
+              }
               continue;
             }
           }
 
           addEdge(DependencyMap, &Inst, DependentInst);
-//          addEdge(BackwardDependencyMap, DependentInst, &Inst);
+          addEdge(BackwardDependencyMap, DependentInst, &Inst);
         }
       }
     }
@@ -106,7 +106,9 @@ void Analyzer::printMap(const std::string &map) {
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *Map = nullptr;
   if (map == "flow") {
     Map = &FlowMap;
-  } else {
+  } else if (map == "back_dep") {
+    Map = &BackwardDependencyMap;
+  }else {
     Map = &DependencyMap;
   }
   for (auto &Pair : *Map) {
@@ -125,6 +127,7 @@ bool Analyzer::MallocFreePathChecker() {
 
   for (Instruction *callInst : callInstructions) {
     if (isMallocCall(callInst)) {
+      errs() << "#####################################################################\n";
       if (hasMallocFreePath(callInst)) {
         errs() << "Malloc-Free Path exists starting from: " << *callInst << "\n";
       } else {
@@ -143,7 +146,7 @@ bool Analyzer::isMallocCall(Instruction *Inst) {
   return false;
 }
 
-bool Analyzer::buildDependencyPath(Instruction *from, Instruction *to) {
+bool Analyzer::buildBackwardDependencyPath(Instruction *from, Instruction *to) {
   std::unordered_set<Instruction *> visitedNodes;
   std::stack<Instruction *> dfsStack;
   dfsStack.push(from);
@@ -158,7 +161,7 @@ bool Analyzer::buildDependencyPath(Instruction *from, Instruction *to) {
 
     visitedNodes.insert(currInst);
 
-    for (Instruction *depInst : DependencyMap[currInst]) {
+    for (Instruction *depInst : BackwardDependencyMap[currInst]) {
       if (visitedNodes.find(depInst) == visitedNodes.end()) {
         dfsStack.push(depInst);
       }
@@ -172,27 +175,27 @@ bool Analyzer::hasMallocFreePath(Instruction *startInst) {
   std::stack<Instruction *> dfsStack;
   dfsStack.push(startInst);
 
+  bool freeCallFound = false;
   while (!dfsStack.empty()) {
     Instruction *currInst = dfsStack.top();
     dfsStack.pop();
 
-//    errs() << "############# CURR: " << *currInst << "\n";
+    errs() << "\tCURRRRR: " << *currInst << "\n";
 
+    // TODO: what is 'free' depends on other malloc not 'startInst'
     if (isFreeCall(currInst)) {
       errs() << "Free inst: " << *currInst << "\n"
              << "\t op1: " << *currInst->getOperand(0) << "\n";
-
-      if (!buildDependencyPath(startInst, currInst)) {
-        return false;
-      }
-      continue;
+      freeCallFound = buildBackwardDependencyPath(currInst, startInst);
     }
 
     // Reached "ret" without encountering a "free" call
-    if (isa<ReturnInst>(currInst)) {
+    if (currInst->getOpcode() == Instruction::Ret) {
       errs() << "Ret inst: " << *currInst << "\n"
              << "\t op1: " << *currInst->getOperand(0) << "\n";
-      return false;
+      if (!freeCallFound) {
+        return false;
+      }
     }
 
     visitedNodes.insert(currInst);
@@ -200,11 +203,12 @@ bool Analyzer::hasMallocFreePath(Instruction *startInst) {
     for (Instruction *nextInst : FlowMap[currInst]) {
       if (visitedNodes.find(nextInst) == visitedNodes.end()) {
         // Check if the dependency is relevant to memory allocation and deallocation
-        if (isRelevantToMemoryManagement(nextInst)) {
           dfsStack.push(nextInst);
-        }
       }
     }
+  }
+  if (!freeCallFound) {
+    return false;
   }
   return true;
 }

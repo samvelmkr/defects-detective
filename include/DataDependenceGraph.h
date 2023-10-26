@@ -11,7 +11,7 @@ namespace llvm {
 class Analyzer {
 private:
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> DependencyMap;
-//  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardDependencyMap;
+  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardDependencyMap;
   std::unordered_set<Instruction *> callInstructions;
 
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> FlowMap;
@@ -28,7 +28,7 @@ public:
 
   bool MallocFreePathChecker();
 
-  bool buildDependencyPath(Instruction* from, Instruction* to);
+  bool buildBackwardDependencyPath(Instruction* from, Instruction* to);
 
   void printMap(const std::string& map);
   static bool isMallocCall(Instruction *PInstruction);

@@ -76,13 +76,13 @@ void SimplePass::analyze(Module &M) {
     analyzer.constructFlow(&Func);
 
     analyzer.MallocFreePathChecker();
-//    analyzer.printMap("flow");
-//    errs() << "-----------------------\n";
-//    analyzer.printMap("back_dep");
-//    errs() << "-----------------------\n";
-//    analyzer.printMap("dep");
-//    errs() << "-----------------------\n";
-//    errs() << "-----------------------\n";
+    analyzer.printMap("flow");
+    errs() << "-----------------------\n";
+    analyzer.printMap("back_dep");
+    errs() << "-----------------------\n";
+    analyzer.printMap("dep");
+    errs() << "-----------------------\n";
+    errs() << "-----------------------\n";
   }
 
   Sarif GenSarif;
