@@ -30,7 +30,7 @@ void Sarif::addResult(const BugReport &Result) {
                               {{Message, {{Text, "Additional information about location."}}},
                                {PhysicalLocation,
                                 {{ArtifactLocation, {{FileUri, TraceElem.first}}},
-                                 {Region, {{StartLine, TraceElem.second[0]}}}}}}}});
+                                 {Region, {{StartLine, TraceElem.second}}}}}}}});
   }
   GenSarif[Runs.data()][0][Results.data()].push_back(
       {{CodeFlows, {{{ThreadFlows, {{{Locations, LocationTrace}}}}}}},

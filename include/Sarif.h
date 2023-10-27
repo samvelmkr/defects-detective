@@ -20,11 +20,11 @@ using namespace llvm;
 /// Use BugReport for collecting all necessary data for result.
 class BugReport {
 public:
-  SmallVector<std::pair<std::string, SmallVector<unsigned>>> Trace;
+  SmallVector<std::pair<std::string, unsigned>> Trace;
   StringRef RuleId;
   int RuleIndex;
 
-  BugReport(const SmallVector<std::pair<std::string, SmallVector<unsigned>>> &Trace,
+  BugReport(const SmallVector<std::pair<std::string, unsigned>> &Trace,
             StringRef RuleId, int RuleIndex)
       : Trace(Trace), RuleId(RuleId), RuleIndex(RuleIndex) {}
 };

@@ -8,7 +8,7 @@
 
 namespace llvm {
 
-class Analyzer {
+class Checker {
 private:
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> DependencyMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardDependencyMap;
@@ -26,7 +26,8 @@ public:
   void createIntraBBEdges(BasicBlock &BB);
   void constructFlow(Function *Func);
 
-  bool MallocFreePathChecker();
+  // If it doesn't find such path, return malloc call.
+  Instruction* MallocFreePathChecker();
 
   bool buildBackwardDependencyPath(Instruction* from, Instruction* to);
 
@@ -34,7 +35,6 @@ public:
   static bool isMallocCall(Instruction *PInstruction);
   static bool isFreeCall(Instruction *Inst);
   bool hasMallocFreePath(Instruction *PInstruction);
-  bool isRelevantToMemoryManagement(Instruction *Inst);
 };
 
 };

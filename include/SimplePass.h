@@ -19,9 +19,12 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
   void analyze(Module &M);
   std::string getFunctionLocation(const Function *Func);
-  SmallVector<std::pair<std::string, SmallVector<unsigned>>> getAllFunctionsTrace(Module &M);
-  unsigned getFunctionLine(const Function *Func);
-  unsigned getFunctionColumn(const Function *Func);
+  SmallVector<std::pair<std::string, unsigned>> getAllFunctionsTrace(Module &M);
+  static unsigned getFunctionFirstLine(const Function *Func);
+  static unsigned getFunctionLastLine(const Function *Func);
+  static unsigned getInstructionLine(const Instruction *Inst);
+
+  SmallVector<std::pair<std::string, unsigned>> createMemLeakTrace(Instruction* mallocCall);
 };
 
 #endif // SIMPLE_PASS_H

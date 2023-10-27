@@ -19,41 +19,59 @@ std::string SimplePass::getFunctionLocation(const Function *Func) {
   return "";
 }
 
-SmallVector<std::pair<std::string, SmallVector<unsigned>>>
+SmallVector<std::pair<std::string, unsigned>>
 SimplePass::getAllFunctionsTrace(Module &M) {
   std::string FilePath;
-  unsigned LineNum, ColumnNum;
-  SmallVector<std::pair<std::string, SmallVector<unsigned>>> Trace;
+  unsigned LineNum;
+  SmallVector<std::pair<std::string, unsigned>> Trace;
 
   for (auto &Func : M.getFunctionList()) {
     if (Func.isDeclarationForLinker())
       continue;
 
     FilePath = getFunctionLocation(&Func);
-    LineNum = getFunctionLine(&Func);
-    ColumnNum = getFunctionColumn(&Func);
-    Trace.emplace_back(FilePath, SmallVector<unsigned>{LineNum, ColumnNum});
+    LineNum = getFunctionFirstLine(&Func);
+    Trace.emplace_back(FilePath, LineNum);
   }
 
   return Trace;
 }
 
-unsigned SimplePass::getFunctionLine(const Function *Func) {
-  for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
-    if (DILocation *Location = InstIt->getDebugLoc()) {
-      return Location->getLine();
-    }
+unsigned SimplePass::getInstructionLine(const Instruction *Inst) {
+  if (DILocation *Location = Inst->getDebugLoc()) {
+    return Location->getLine();
   }
-  return 0;
+  return -1;
 }
 
-unsigned SimplePass::getFunctionColumn(const Function *Func) {
-  for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
-    if (DILocation *Location = InstIt->getDebugLoc()) {
-      return Location->getColumn();
-    }
+unsigned SimplePass::getFunctionFirstLine(const Function *Func) {
+  const BasicBlock &entryBB = Func->getEntryBlock();
+  if (!entryBB.empty()) {
+    return getInstructionLine(&entryBB.front());
   }
-  return 0;
+  return -1;
+}
+
+unsigned SimplePass::getFunctionLastLine(const Function *Func) {
+  const BasicBlock &lastBB = *(--(Func->end()));
+  if (!lastBB.empty()) {
+    return getInstructionLine(&*(--(lastBB.end())));
+  }
+  return -1;
+}
+
+SmallVector<std::pair<std::string, unsigned>> SimplePass::createMemLeakTrace(Instruction *mallocCall) {
+  if (!mallocCall) {
+    return {};
+  }
+  SmallVector<std::pair<std::string, unsigned>> Trace;
+
+  std::string FilePath = getFunctionLocation(mallocCall->getFunction());
+  unsigned mallocLine = getInstructionLine(mallocCall);
+  unsigned expectedFreeLine = getFunctionLastLine(mallocCall->getFunction());
+  Trace.emplace_back(FilePath, mallocLine);
+  Trace.emplace_back(FilePath, expectedFreeLine);
+  return Trace;
 }
 
 PreservedAnalyses SimplePass::run(Module &M, ModuleAnalysisManager &) {
@@ -70,40 +88,29 @@ void SimplePass::analyze(Module &M) {
     if (Func.isDeclarationForLinker()) {
       continue;
     }
-//    errs() << "Func: " << Func.getName() << "\n";
-    Analyzer analyzer;
+    Checker analyzer;
     analyzer.collectDependencies(&Func);
     analyzer.constructFlow(&Func);
 
-    analyzer.MallocFreePathChecker();
-    analyzer.printMap("flow");
-    errs() << "-----------------------\n";
-    analyzer.printMap("back_dep");
-    errs() << "-----------------------\n";
-    analyzer.printMap("dep");
-    errs() << "-----------------------\n";
-    errs() << "-----------------------\n";
+    if (Instruction *resInst = analyzer.MallocFreePathChecker()) {
+      Sarif GenSarif;
+      SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(resInst);
+      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
+      GenSarif.save();
+    }
   }
-
-  Sarif GenSarif;
-  /// These properties are added for example, you must generate a trace according to the report.
-  SmallVector<std::pair<std::string, SmallVector<unsigned>>> Trace = getAllFunctionsTrace(M);
-
-  GenSarif.addResult(BugReport(Trace, "use-after-free", 2));
-
-  GenSarif.save();
 }
 
 /// Register the pass.
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK llvmGetPassPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "simple", LLVM_VERSION_STRING, [](PassBuilder &PB) {
-            PB.registerPipelineParsingCallback([&](StringRef Name, ModulePassManager &MPM,
-                                                   ArrayRef<PassBuilder::PipelineElement>) {
-              if (Name == "simple") {
-                MPM.addPass(SimplePass());
-                return true;
-              }
-              return false;
-            });
-          }};
+    PB.registerPipelineParsingCallback([&](StringRef Name, ModulePassManager &MPM,
+                                           ArrayRef<PassBuilder::PipelineElement>) {
+      if (Name == "simple") {
+        MPM.addPass(SimplePass());
+        return true;
+      }
+      return false;
+    });
+  }};
 }
