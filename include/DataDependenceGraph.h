@@ -16,10 +16,10 @@ private:
 
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> FlowMap;
 public:
-  void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
-               Instruction *Source, Instruction *Destination);
-  bool hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
-               Instruction *Source, Instruction *Destination);
+  static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
+                      Instruction *Source, Instruction *Destination);
+  static bool hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
+                      Instruction *Source, Instruction *Destination);
 
   void collectDependencies(Function *Func);
 

@@ -56,21 +56,6 @@ void Checker::collectDependencies(Function *Func) {
       }
     }
   }
-
-//  for (auto &BB : *Func) {
-//    for (auto &I : BB) {
-//      errs() << "Instr: " << I << "\n";
-//      for (Use &U : I.operands()) {
-//        errs() << "use: " << *U << "\n";
-//        Value *Operand = U.get();
-//        errs() << "operand: " << *Operand << "\n";
-//        if (auto *DependentInst = dyn_cast<Instruction>(Operand)) {
-//          addEdge(DependentInst, &I);
-//        }
-//      }
-//      errs() << "\n";
-//    }
-//  }
 }
 
 void Checker::createIntraBBEdges(BasicBlock &BB) {
@@ -89,7 +74,6 @@ void Checker::constructFlow(Function *Func) {
     createIntraBBEdges(BB);
     Instruction *lastInst = &BB.back();
 
-    // TODO: is there any jump instructions except 'br'?
     if (lastInst->getOpcode() == Instruction::Br) {
       auto *Branch = dyn_cast<BranchInst>(lastInst);
       if (Branch->isConditional()) {
@@ -125,10 +109,10 @@ Instruction *Checker::MallocFreePathChecker() {
   for (Instruction *callInst : callInstructions) {
     if (isMallocCall(callInst)) {
       if (hasMallocFreePath(callInst)) {
-        errs() << "Malloc-Free Path exists starting from: " << *callInst << "\n";
+        // Malloc-Free Path exists starting from: callInst
         return nullptr;
       } else {
-        errs() << "No Malloc-Free Path found starting from: " << *callInst << "\n";
+        // No Malloc-Free Path found starting from: callInst
         return callInst;
       }
     }
@@ -178,7 +162,6 @@ bool Checker::hasMallocFreePath(Instruction *startInst) {
     Instruction *currInst = dfsStack.top();
     dfsStack.pop();
 
-    // TODO: what is 'free' depends on other malloc not 'startInst'
     if (isFreeCall(currInst)) {
       freeCallFound = buildBackwardDependencyPath(currInst, startInst);
     }
