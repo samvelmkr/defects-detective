@@ -1,5 +1,5 @@
 #include "SimplePass.h"
-#include "DataDependenceGraph.h"
+#include "Checker.h"
 
 std::string SimplePass::getFunctionLocation(const Function *Func) {
   for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
