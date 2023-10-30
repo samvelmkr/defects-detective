@@ -8,13 +8,20 @@
 
 namespace llvm {
 
+enum CheckerMaps {
+  ForwardDependencyMap,
+  BackwardDependencyMap,
+  FlowMap,
+};
+
 class Checker {
 private:
-  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> DependencyMap;
+  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> ForwardDependencyMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardDependencyMap;
-  std::unordered_set<Instruction *> callInstructions;
-
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> FlowMap;
+
+  std::unordered_map<std::string, std::unordered_set<Instruction *>> callInstructions;
+
 public:
   static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
                       Instruction *Source, Instruction *Destination);
@@ -28,6 +35,9 @@ public:
 
   // If it doesn't find such path, return malloc call.
   Instruction* MallocFreePathChecker();
+
+  bool DFS(CheckerMaps MapID, Instruction *startInst,
+           const std::function<bool(Instruction*)>& terminationCondition);
 
   bool buildBackwardDependencyPath(Instruction* from, Instruction* to);
 
