@@ -90,7 +90,6 @@ void SimplePass::analyze(Module &M) {
     }
     Checker analyzer;
     analyzer.collectDependencies(&Func);
-    analyzer.constructFlow(&Func);
 
     if (Instruction *resInst = analyzer.MallocFreePathChecker()) {
       Sarif GenSarif;
@@ -98,6 +97,8 @@ void SimplePass::analyze(Module &M) {
       GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
       GenSarif.save();
     }
+
+    analyzer.BuffOverflowChecker(&Func);
   }
 }
 

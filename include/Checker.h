@@ -23,11 +23,14 @@ private:
   std::unordered_map<std::string, std::unordered_set<Instruction *>> callInstructions;
 
 public:
-  static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
+  //===--------------------------------------------------------------------===//
+  // Memory leak checker.
+  //===--------------------------------------------------------------------===//
+  static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
                       Instruction *Source, Instruction *Destination);
-  static void removeEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
-                      Instruction *Source, Instruction *Destination);
-  static bool hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
+  static void removeEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
+                         Instruction *Source, Instruction *Destination);
+  static bool hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
                       Instruction *Source, Instruction *Destination);
 
   void collectDependencies(Function *Func);
@@ -38,17 +41,23 @@ public:
   void updateDependencies();
 
   // If it doesn't find such path, return malloc call.
-  Instruction* MallocFreePathChecker();
+  Instruction *MallocFreePathChecker();
 
   bool DFS(CheckerMaps MapID, Instruction *startInst,
-           const std::function<bool(Instruction*)>& terminationCondition);
+           const std::function<bool(Instruction *)> &terminationCondition);
 
-  bool buildBackwardDependencyPath(Instruction* from, Instruction* to);
+  bool buildBackwardDependencyPath(Instruction *from, Instruction *to);
 
-  void printMap(const std::string& map);
+  void printMap(const std::string &map);
   static bool isMallocCall(Instruction *PInstruction);
   static bool isFreeCall(Instruction *Inst);
   bool hasMallocFreePath(Instruction *PInstruction);
+
+  //===--------------------------------------------------------------------===//
+  // Buffer overflow checker.
+  //===--------------------------------------------------------------------===//
+  static bool isScanfCall(Instruction *Inst);
+  std::pair<Instruction *, Instruction *> *BuffOverflowChecker(Function *Func);
 };
 
 };

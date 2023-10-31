@@ -1,5 +1,7 @@
 #include "Checker.h"
 
+#include "llvm/IR/GlobalVariable.h"
+
 #include <stack>
 
 namespace llvm {
@@ -37,6 +39,10 @@ void Checker::collectDependencies(Function *Func) {
         if (isFreeCall(&Inst)) {
           callInstructions["free"].insert(&Inst);
         }
+        if (isScanfCall(&Inst)) {
+          errs() << "AAAAAAAAAAAAAAAAAAAAAA Found\n";
+          callInstructions["scanf"].insert(&Inst);
+        }
       }
 
       auto Uses = Inst.uses();
@@ -71,10 +77,14 @@ void Checker::collectDependencies(Function *Func) {
 
   // GEP validation
   updateDependencies();
+
+  // create cfg
+  constructFlow(Func);
 }
 
 void Checker::updateDependencies() {
-  if (callInstructions.empty()) {
+  if (callInstructions.empty() ||
+      callInstructions.find("malloc") == callInstructions.end()) {
     return;
   }
   for (Instruction *callInst : callInstructions.at("malloc")) {
@@ -146,7 +156,8 @@ void Checker::printMap(const std::string &map) {
 }
 
 Instruction *Checker::MallocFreePathChecker() {
-  if (callInstructions.empty()) {
+  if (callInstructions.empty() ||
+      callInstructions.find("malloc") == callInstructions.end()) {
     return nullptr;
   }
   for (Instruction *callInst : callInstructions.at("malloc")) {
@@ -253,6 +264,70 @@ bool Checker::DFS(CheckerMaps MapID,
     }
   }
   return false;
+}
+//===--------------------------------------------------------------------===//
+// Buffer overflow checker.
+//===--------------------------------------------------------------------===//
+
+bool Checker::isScanfCall(Instruction *Inst) {
+  if (auto *callInst = dyn_cast<CallInst>(Inst)) {
+    Function *calledFunc = callInst->getCalledFunction();
+    return calledFunc->getName() == "__isoc99_scanf";
+  }
+  return false;
+}
+
+std::pair<Instruction *, Instruction *> *Checker::BuffOverflowChecker(Function *Func) {
+  if (callInstructions.empty() ||
+      callInstructions.find("scanf") == callInstructions.end()) {
+    return nullptr;
+  }
+
+  for (Instruction *Inst : callInstructions.at("scanf")) {
+    errs() << "scanf call" << *Inst << "\n";
+    CallInst* callInst = dyn_cast<CallInst>(Inst);
+    for (auto& op : callInst->operands()) {
+      errs() << "\top: " << *op << "\n";
+    }
+
+    Value* formatStringAgr = callInst->getOperand(0);
+    Value* bufArg = callInst->getOperand(1);
+    errs() << "Aaaaaaa\n";
+    auto *formatStringConst = dyn_cast<GetElementPtrInst>(formatStringAgr);
+//    errs() << formatString->getType() << "\n";
+    if (!formatStringConst) {
+      errs() << "ebani vrot\n";
+    }
+    errs() << formatStringConst << "\n";
+    return;
+    ConstantDataArray *formatArray = dyn_cast<ConstantDataArray>(formatStringConst->getInitializer());
+    errs() << "Ccccccc\n";
+    StringRef formatString = formatArray->getAsCString();
+    errs() << "Dddddddd\n";
+    errs() << formatString << "\n";
+  }
+
+//  if (auto *call = dyn_cast<CallInst>(&I)) {
+//    Function *calledFunc = call->getCalledFunction();
+//    if (calledFunc && calledFunc->getName() == "__isoc99_scanf") {
+//      // This is a call to scanf.
+//      Value *formatStringArg =
+//      Value *bufferArg = call->getArgOperand(1);
+//      if (auto *formatStringConst = dyn_cast<GlobalVariable>(formatStringArg)) {
+//        ConstantDataArray *formatArray = dyn_cast<ConstantDataArray>(formatStringConst->getInitializer());
+//        if (formatArray) {
+//          StringRef formatString = formatArray->getAsCString();
+//          if (formatString.find("%s") != StringRef::npos) {
+//            // The format string contains %s.
+//            // Analyze the buffer size and check for potential overflows.
+//            // You can compare the buffer size with the input size expected by %s.
+//            // Note: This is a simplified example and may not cover all cases.
+//          }
+//        }
+//      }
+//    }
+//  }
+  return nullptr;
 }
 
 };
