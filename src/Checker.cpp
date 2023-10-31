@@ -173,7 +173,11 @@ bool Checker::buildBackwardDependencyPath(Instruction *from, Instruction *to) {
 }
 
 bool Checker::hasMallocFreePath(Instruction *startInst) {
+  bool reachedAlloca = false;
+  bool reachedGEP = false;
   bool structField = false;
+
+  // Check for struct field access
   for (auto &depInst : ForwardDependencyMap[startInst]) {
     if (depInst->getOpcode() == Instruction::GetElementPtr) {
       structField = true;
@@ -181,10 +185,9 @@ bool Checker::hasMallocFreePath(Instruction *startInst) {
     }
   }
 
+  std::function<bool(Instruction *)> terminationCondition;
   if (structField) {
-    bool reachedAlloca = false;
-    bool reachedGEP = false;
-    return DFS(CheckerMaps::ForwardDependencyMap, startInst, [&reachedAlloca, &reachedGEP](Instruction *inst) {
+    terminationCondition = [&reachedAlloca, &reachedGEP](Instruction *inst) {
       if (inst->getOpcode() == Instruction::Alloca) {
         reachedAlloca = true;
       }
@@ -195,15 +198,17 @@ bool Checker::hasMallocFreePath(Instruction *startInst) {
         return true;
       }
       return false;
-    });
+    };
+  } else {
+    terminationCondition = [](Instruction *inst) {
+      if (isFreeCall(inst)) {
+        return true;
+      }
+      return false;
+    };
   }
 
-  return DFS(CheckerMaps::ForwardDependencyMap, startInst, [](Instruction *inst) {
-    if (isFreeCall(inst)) {
-      return true;
-    }
-    return false;
-  });
+  return DFS(CheckerMaps::ForwardDependencyMap, startInst, terminationCondition);
 }
 
 bool Checker::isFreeCall(Instruction *Inst) {
