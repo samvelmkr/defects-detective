@@ -92,14 +92,6 @@ void SimplePass::analyze(Module &M) {
     analyzer.collectDependencies(&Func);
     analyzer.constructFlow(&Func);
 
-//    analyzer.printMap("flow");
-//    errs() << "-----\n";
-//    analyzer.printMap("back_dep");
-//    errs() << "-----\n";
-//    analyzer.printMap("dep");
-//    errs() << "-----\n";
-//    errs() << "-----\n";
-
     if (Instruction *resInst = analyzer.MallocFreePathChecker()) {
       Sarif GenSarif;
       SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(resInst);

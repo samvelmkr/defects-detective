@@ -15,7 +15,7 @@ check_build_file() {
 project_build() {
   BUILD_DIRECTORY="$1"
   cd "$BUILD_DIRECTORY"
-  cmake ../
+  cmake ../ 
   make
 }
 

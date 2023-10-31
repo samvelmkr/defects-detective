@@ -25,6 +25,8 @@ private:
 public:
   static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
                       Instruction *Source, Instruction *Destination);
+  static void removeEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
+                      Instruction *Source, Instruction *Destination);
   static bool hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>>& Map,
                       Instruction *Source, Instruction *Destination);
 
@@ -32,6 +34,8 @@ public:
 
   void createIntraBBEdges(BasicBlock &BB);
   void constructFlow(Function *Func);
+
+  void updateDependencies();
 
   // If it doesn't find such path, return malloc call.
   Instruction* MallocFreePathChecker();

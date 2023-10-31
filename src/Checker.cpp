@@ -9,6 +9,14 @@ void Checker::addEdge(std::unordered_map<Instruction *, std::unordered_set<Instr
   Map[Source].insert(Destination);
 }
 
+void Checker::removeEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
+                         Instruction *Source,
+                         Instruction *Destination) {
+  if (Map.find(Source) != Map.end()) {
+    Map[Source].erase(Destination);
+  }
+}
+
 bool Checker::hasEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
                       Instruction *Source, Instruction *Destination) {
   auto sourceIter = Map.find(Source);
@@ -37,22 +45,6 @@ void Checker::collectDependencies(Function *Func) {
       }
       for (auto &use : Uses) {
         if (auto *DependentInst = dyn_cast<llvm::Instruction>(use.getUser())) {
-          if (DependentInst->getOpcode() == Instruction::GetElementPtr) {
-            // Go up to the dependent instruction 'alloca'
-//            errs() << *DependentInst << "\n";
-            auto* GEPInst = dyn_cast<GetElementPtrInst>(DependentInst);
-//            errs() << "first: " <<  *GEPInst->getOperand(0) << "\n";
-            Instruction* firstOp = dyn_cast<Instruction>(GEPInst->getOperand(0));
-//            errs() << "Uses\n";
-            for (Instruction* Predecessor: BackwardDependencyMap.at(firstOp)) {
-//              errs() << "\tbdf: " << *Predecessor << "\n";
-              if (Predecessor->getOpcode() == Instruction::Alloca) {
-                addEdge(DependencyMap, DependentInst, Predecessor);
-                addEdge(BackwardDependencyMap, Predecessor, DependentInst);
-                break;
-              }
-            }
-          }
           if (DependentInst->getOpcode() == Instruction::Store) {
             auto *sInst = dyn_cast<StoreInst>(DependentInst);
             Value *firstOp = sInst->getValueOperand();
@@ -60,8 +52,8 @@ void Checker::collectDependencies(Function *Func) {
             if (!isa<Constant>(firstOp)) {
               auto *fromInst = dyn_cast<Instruction>(firstOp);
               auto *toInst = dyn_cast<Instruction>(secondOp);
-              if (!hasEdge(DependencyMap, fromInst, toInst)) {
-                addEdge(DependencyMap, fromInst, toInst);
+              if (!hasEdge(ForwardDependencyMap, fromInst, toInst)) {
+                addEdge(ForwardDependencyMap, fromInst, toInst);
               }
               if (!hasEdge(BackwardDependencyMap, toInst, fromInst)) {
                 addEdge(BackwardDependencyMap, toInst, fromInst);
@@ -70,11 +62,39 @@ void Checker::collectDependencies(Function *Func) {
             }
           }
 
-          addEdge(DependencyMap, &Inst, DependentInst);
+          addEdge(ForwardDependencyMap, &Inst, DependentInst);
           addEdge(BackwardDependencyMap, DependentInst, &Inst);
         }
       }
     }
+  }
+
+  // GEP validation
+  updateDependencies();
+}
+
+void Checker::updateDependencies() {
+  if (callInstructions.empty()) {
+    return;
+  }
+  for (Instruction *callInst : callInstructions.at("malloc")) {
+    for (auto &depInst : ForwardDependencyMap[callInst]) {
+      if (depInst->getOpcode() == Instruction::GetElementPtr) {
+        auto *GEPInst = dyn_cast<GetElementPtrInst>(depInst);
+        auto *firstOp = dyn_cast<Instruction>(GEPInst->getOperand(0));
+        // Go up to the dependent instruction 'alloca'
+        for (Instruction *Predecessor : BackwardDependencyMap.at(firstOp)) {
+          if (Predecessor->getOpcode() == Instruction::Alloca) {
+            removeEdge(ForwardDependencyMap, Predecessor, firstOp);
+            removeEdge(BackwardDependencyMap, firstOp, Predecessor);
+
+            addEdge(ForwardDependencyMap, depInst, Predecessor);
+            addEdge(BackwardDependencyMap, Predecessor, depInst);
+          }
+        }
+      }
+    }
+
   }
 }
 
@@ -126,16 +146,15 @@ void Checker::printMap(const std::string &map) {
 }
 
 Instruction *Checker::MallocFreePathChecker() {
+  if (callInstructions.empty()) {
+    return nullptr;
+  }
   for (Instruction *callInst : callInstructions.at("malloc")) {
-    if (isMallocCall(callInst)) {
-      if (hasMallocFreePath(callInst)) {
-        // Malloc-Free Path exists starting from: callInst
-        errs() << "Malloc-Free Path exists starting from:" <<  *callInst << "\n";
-      } else {
-        // No Malloc-Free Path found starting from: callInst
-        errs() << "No Malloc-Free Path found starting from:" << *callInst << "\n";
-        return callInst;
-      }
+    if (hasMallocFreePath(callInst)) {
+      // Malloc-Free Path exists starting from: callInst
+    } else {
+      // No Malloc-Free Path found starting from: callInst
+      return callInst;
     }
   }
   return nullptr;
@@ -150,76 +169,41 @@ bool Checker::isMallocCall(Instruction *Inst) {
 }
 
 bool Checker::buildBackwardDependencyPath(Instruction *from, Instruction *to) {
-  return DFS(CheckerMaps::BackwardDependencyMap, from, [to](Instruction* inst) { return inst == to; });
-
-//  std::unordered_set<Instruction *> visitedNodes;
-//  std::stack<Instruction *> dfsStack;
-//  dfsStack.push(from);
-//
-//  while (!dfsStack.empty()) {
-//    Instruction *currInst = dfsStack.top();
-//    dfsStack.pop();
-//
-//    if (currInst == to) {
-//      return true;
-//    }
-//
-//    visitedNodes.insert(currInst);
-//
-//    for (Instruction *depInst : BackwardDependencyMap[currInst]) {
-//      if (visitedNodes.find(depInst) == visitedNodes.end()) {
-//        dfsStack.push(depInst);
-//      }
-//    }
-//  }
-//  return false;
+  return DFS(CheckerMaps::BackwardDependencyMap, from, [to](Instruction *inst) { return inst == to; });
 }
 
 bool Checker::hasMallocFreePath(Instruction *startInst) {
-  bool freeCallFound = false;
-
-  return DFS(CheckerMaps::FlowMap, startInst, [&startInst, &freeCallFound, this](Instruction* inst) {
-    if (isFreeCall(inst)) {
-      freeCallFound = buildBackwardDependencyPath(inst, startInst);
+  bool structField = false;
+  for (auto &depInst : ForwardDependencyMap[startInst]) {
+    if (depInst->getOpcode() == Instruction::GetElementPtr) {
+      structField = true;
+      startInst = depInst;
     }
-    if (inst->getOpcode() == Instruction::Ret) {
-      return !freeCallFound;
+  }
+
+  if (structField) {
+    bool reachedAlloca = false;
+    bool reachedGEP = false;
+    return DFS(CheckerMaps::ForwardDependencyMap, startInst, [&reachedAlloca, &reachedGEP](Instruction *inst) {
+      if (inst->getOpcode() == Instruction::Alloca) {
+        reachedAlloca = true;
+      }
+      if (reachedAlloca && inst->getOpcode() == Instruction::GetElementPtr) {
+        reachedGEP = true;
+      }
+      if (reachedAlloca && reachedGEP && isFreeCall(inst)) {
+        return true;
+      }
+      return false;
+    });
+  }
+
+  return DFS(CheckerMaps::ForwardDependencyMap, startInst, [](Instruction *inst) {
+    if (isFreeCall(inst)) {
+      return true;
     }
     return false;
-  }) && freeCallFound;
-
-//  std::unordered_set<Instruction *> visitedNodes;
-//  std::stack<Instruction *> dfsStack;
-//  dfsStack.push(startInst);
-//
-//  bool freeCallFound = false;
-//  while (!dfsStack.empty()) {
-//    Instruction *currInst = dfsStack.top();
-//    dfsStack.pop();
-//
-//    if (isFreeCall(currInst)) {
-//      freeCallFound = buildBackwardDependencyPath(currInst, startInst);
-//    }
-//
-//    // Reached "ret" without encountering a "free" call
-//    if (currInst->getOpcode() == Instruction::Ret) {
-//      if (!freeCallFound) {
-//        return false;
-//      }
-//    }
-//
-//    visitedNodes.insert(currInst);
-//
-//    for (Instruction *nextInst : FlowMap[currInst]) {
-//      if (visitedNodes.find(nextInst) == visitedNodes.end()) {
-//        dfsStack.push(nextInst);
-//      }
-//    }
-//  }
-//  if (!freeCallFound) {
-//    return false;
-//  }
-//  return true;
+  });
 }
 
 bool Checker::isFreeCall(Instruction *Inst) {
@@ -235,14 +219,11 @@ bool Checker::DFS(CheckerMaps MapID,
                   const std::function<bool(Instruction *)> &terminationCondition) {
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *Map = nullptr;
   switch (MapID) {
-  case CheckerMaps::ForwardDependencyMap:
-    Map = &ForwardDependencyMap;
+  case CheckerMaps::ForwardDependencyMap:Map = &ForwardDependencyMap;
     break;
-  case CheckerMaps::BackwardDependencyMap:
-    Map = &BackwardDependencyMap;
+  case CheckerMaps::BackwardDependencyMap:Map = &BackwardDependencyMap;
     break;
-  case CheckerMaps::FlowMap:
-    Map = &FlowMap;
+  case CheckerMaps::FlowMap:Map = &FlowMap;
     break;
   }
 
@@ -260,7 +241,7 @@ bool Checker::DFS(CheckerMaps MapID,
 
     visitedNodes.insert(currInst);
 
-    for (Instruction *nextInst : Map[currInst]) {
+    for (Instruction *nextInst : Map->operator[](currInst)) {
       if (visitedNodes.find(nextInst) == visitedNodes.end()) {
         dfsStack.push(nextInst);
       }
