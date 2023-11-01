@@ -2,6 +2,7 @@
 
 #include "llvm/IR/GlobalVariable.h"
 
+#include <sstream>
 #include <stack>
 
 namespace llvm {
@@ -40,7 +41,6 @@ void Checker::collectDependencies(Function *Func) {
           callInstructions["free"].insert(&Inst);
         }
         if (isScanfCall(&Inst)) {
-          errs() << "AAAAAAAAAAAAAAAAAAAAAA Found\n";
           callInstructions["scanf"].insert(&Inst);
         }
       }
@@ -269,6 +269,39 @@ bool Checker::DFS(CheckerMaps MapID,
 // Buffer overflow checker.
 //===--------------------------------------------------------------------===//
 
+unsigned int Checker::getFormatStringSize(GlobalVariable *var) {
+  if (Constant *formatStringConst = var->getInitializer()) {
+    if (ConstantDataArray *formatArray = dyn_cast<ConstantDataArray>(formatStringConst)) {
+      StringRef formatString = formatArray->getAsCString();
+      std::stringstream ss(formatString.data());
+      char c;
+
+      while (ss >> c) {
+        if (c == '%') {
+          c = (char) ss.peek();
+          if (c && !isdigit(c)) {
+            return 0;
+          } else {
+            unsigned int res;
+            ss >> res;
+            return res;
+          }
+        }
+      }
+
+    }
+  }
+  return 0;
+}
+
+unsigned int Checker::getArraySize(AllocaInst *pointerArray) {
+  Type *basePointerType = pointerArray->getAllocatedType();
+  if (auto *arrType = dyn_cast<ArrayType>(basePointerType)) {
+    return arrType->getNumElements();
+  }
+  return 0;
+}
+
 bool Checker::isScanfCall(Instruction *Inst) {
   if (auto *callInst = dyn_cast<CallInst>(Inst)) {
     Function *calledFunc = callInst->getCalledFunction();
@@ -277,57 +310,35 @@ bool Checker::isScanfCall(Instruction *Inst) {
   return false;
 }
 
-std::pair<Instruction *, Instruction *> *Checker::BuffOverflowChecker(Function *Func) {
+InstructionPairPtr::Ptr Checker::BuffOverflowChecker(llvm::Function *Func) {
   if (callInstructions.empty() ||
       callInstructions.find("scanf") == callInstructions.end()) {
-    return nullptr;
+    return {};
   }
 
-  for (Instruction *Inst : callInstructions.at("scanf")) {
-    errs() << "scanf call" << *Inst << "\n";
-    CallInst* callInst = dyn_cast<CallInst>(Inst);
-    for (auto& op : callInst->operands()) {
-      errs() << "\top: " << *op << "\n";
+  for (Instruction *cInst : callInstructions.at("scanf")) {
+    auto *callInst = dyn_cast<CallInst>(cInst);
+
+    Value *formatStringAgr = callInst->getOperand(0);
+    auto *bufArgInst = dyn_cast<Instruction>(callInst->getOperand(1));
+    auto *bufGEP = dyn_cast<GetElementPtrInst>(bufArgInst);
+    Value *basePointer = bufGEP->getPointerOperand();
+    auto *basePointerArray = dyn_cast<AllocaInst>(basePointer);
+    if (!basePointerArray) {
+      return {};
     }
 
-    Value* formatStringAgr = callInst->getOperand(0);
-    Value* bufArg = callInst->getOperand(1);
-    errs() << "Aaaaaaa\n";
-    auto *formatStringConst = dyn_cast<GetElementPtrInst>(formatStringAgr);
-//    errs() << formatString->getType() << "\n";
-    if (!formatStringConst) {
-      errs() << "ebani vrot\n";
+    if (auto *formatStringGV = dyn_cast<GlobalVariable>(formatStringAgr->stripPointerCasts())) {
+      unsigned int formatStringSize = getFormatStringSize(formatStringGV);
+      if (!formatStringSize) {
+        return InstructionPairPtr::makePair(basePointerArray, cInst);
+      }
+      if (formatStringSize >= getArraySize(basePointerArray)) {
+        return InstructionPairPtr::makePair(basePointerArray, cInst);
+      }
     }
-    errs() << formatStringConst << "\n";
-    return;
-    ConstantDataArray *formatArray = dyn_cast<ConstantDataArray>(formatStringConst->getInitializer());
-    errs() << "Ccccccc\n";
-    StringRef formatString = formatArray->getAsCString();
-    errs() << "Dddddddd\n";
-    errs() << formatString << "\n";
   }
-
-//  if (auto *call = dyn_cast<CallInst>(&I)) {
-//    Function *calledFunc = call->getCalledFunction();
-//    if (calledFunc && calledFunc->getName() == "__isoc99_scanf") {
-//      // This is a call to scanf.
-//      Value *formatStringArg =
-//      Value *bufferArg = call->getArgOperand(1);
-//      if (auto *formatStringConst = dyn_cast<GlobalVariable>(formatStringArg)) {
-//        ConstantDataArray *formatArray = dyn_cast<ConstantDataArray>(formatStringConst->getInitializer());
-//        if (formatArray) {
-//          StringRef formatString = formatArray->getAsCString();
-//          if (formatString.find("%s") != StringRef::npos) {
-//            // The format string contains %s.
-//            // Analyze the buffer size and check for potential overflows.
-//            // You can compare the buffer size with the input size expected by %s.
-//            // Note: This is a simplified example and may not cover all cases.
-//          }
-//        }
-//      }
-//    }
-//  }
-  return nullptr;
+  return {};
 }
 
 };

@@ -2,6 +2,7 @@
 #define SIMPLE_PASS_H
 
 #include "Sarif.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/InstIterator.h"
@@ -25,6 +26,7 @@ public:
   static unsigned getInstructionLine(const Instruction *Inst);
 
   SmallVector<std::pair<std::string, unsigned>> createMemLeakTrace(Instruction* mallocCall);
-};
+  SmallVector<std::pair<std::string, unsigned>> createBOFTrace(Instruction *allocInst, Instruction *instBOF);
+  };
 
 #endif // SIMPLE_PASS_H

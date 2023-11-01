@@ -37,9 +37,23 @@ SimplePass::getAllFunctionsTrace(Module &M) {
   return Trace;
 }
 
+
+
 unsigned SimplePass::getInstructionLine(const Instruction *Inst) {
   if (DILocation *Location = Inst->getDebugLoc()) {
     return Location->getLine();
+  } else {
+    errs() << *Inst << "\n";
+    const Function* Func = Inst->getFunction();
+    for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
+      if (auto* dbgDeclare = dyn_cast<DbgDeclareInst>(&*InstIt)) {
+        errs() << "found " << *dbgDeclare << " | " << dbgDeclare->getDebugLoc().getLine() << "\n";
+        errs() << "\top: " << *dbgDeclare->getOperand(0) << "\n";
+        errs() << "\topval: " << *dbgDeclare->getAddress() << "\n";
+
+
+      }
+    }
   }
   return -1;
 }
@@ -74,6 +88,20 @@ SmallVector<std::pair<std::string, unsigned>> SimplePass::createMemLeakTrace(Ins
   return Trace;
 }
 
+SmallVector<std::pair<std::string, unsigned>> SimplePass::createBOFTrace(Instruction *allocInst, Instruction *instBOF) {
+  if (!allocInst || !instBOF) {
+    return {};
+  }
+  SmallVector<std::pair<std::string, unsigned>> Trace;
+
+  std::string FilePath = getFunctionLocation(allocInst->getFunction());
+  unsigned arrDeclarationLine = getInstructionLine(allocInst);
+  unsigned BOFLine = getInstructionLine(instBOF);
+  Trace.emplace_back(FilePath, arrDeclarationLine);
+  Trace.emplace_back(FilePath, BOFLine);
+  return Trace;
+}
+
 PreservedAnalyses SimplePass::run(Module &M, ModuleAnalysisManager &) {
   analyze(M);
   return PreservedAnalyses::all();
@@ -91,14 +119,20 @@ void SimplePass::analyze(Module &M) {
     Checker analyzer;
     analyzer.collectDependencies(&Func);
 
-    if (Instruction *resInst = analyzer.MallocFreePathChecker()) {
-      Sarif GenSarif;
-      SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(resInst);
+    Sarif GenSarif;
+
+    if (Instruction *mlLoc = analyzer.MallocFreePathChecker()) {
+      SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(mlLoc);
       GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
-      GenSarif.save();
     }
 
-    analyzer.BuffOverflowChecker(&Func);
+    if (InstructionPairPtr::Ptr bofLoc = analyzer.BuffOverflowChecker(&Func)) {
+      errs() << *bofLoc->first << " | "  << *bofLoc->second << "\n";
+      SmallVector<std::pair<std::string, unsigned>> Trace = createBOFTrace(bofLoc->first, bofLoc->second);
+      GenSarif.addResult(BugReport(Trace, "buffer-overflow", 1));
+    }
+
+    GenSarif.save();
   }
 }
 

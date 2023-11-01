@@ -8,6 +8,15 @@
 
 namespace llvm {
 
+class InstructionPairPtr {
+public:
+  using Ptr = std::shared_ptr<std::pair<Instruction*, Instruction*>>;
+
+  static Ptr makePair(Instruction* inst1, Instruction* inst2) {
+    return std::make_shared<std::pair<Instruction*, Instruction*>>(inst1, inst2);
+  }
+};
+
 enum CheckerMaps {
   ForwardDependencyMap,
   BackwardDependencyMap,
@@ -56,8 +65,11 @@ public:
   //===--------------------------------------------------------------------===//
   // Buffer overflow checker.
   //===--------------------------------------------------------------------===//
+  static unsigned int getArraySize(AllocaInst *pointerArray);
+  static unsigned int getFormatStringSize(GlobalVariable *var);
+
   static bool isScanfCall(Instruction *Inst);
-  std::pair<Instruction *, Instruction *> *BuffOverflowChecker(Function *Func);
+  InstructionPairPtr::Ptr BuffOverflowChecker(Function *Func);
 };
 
 };
