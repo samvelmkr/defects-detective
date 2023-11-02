@@ -310,12 +310,11 @@ bool Checker::isScanfCall(Instruction *Inst) {
   return false;
 }
 
-InstructionPairPtr::Ptr Checker::BuffOverflowChecker(llvm::Function *Func) {
+InstructionPairPtr::Ptr Checker::ScanfValidation() {
   if (callInstructions.empty() ||
       callInstructions.find("scanf") == callInstructions.end()) {
     return {};
   }
-
   for (Instruction *cInst : callInstructions.at("scanf")) {
     auto *callInst = dyn_cast<CallInst>(cInst);
 
@@ -339,6 +338,39 @@ InstructionPairPtr::Ptr Checker::BuffOverflowChecker(llvm::Function *Func) {
     }
   }
   return {};
+}
+
+InstructionPairPtr::Ptr Checker::OutOfBoundsAccessChecker() {
+  if (callInstructions.empty() ||
+      callInstructions.find("malloc") == callInstructions.end()) {
+    return {};
+  }
+  for (Instruction *callInst : callInstructions.at("malloc")) {
+    std::unique_ptr<MallocInfo> mInfo = std::make_unique<MallocInfo>(callInst);
+  }
+  return {};
+}
+
+InstructionPairPtr::Ptr Checker::BuffOverflowChecker(llvm::Function *Func) {
+  InstructionPairPtr::Ptr scanfBOF = ScanfValidation();
+  if (scanfBOF) {
+    return scanfBOF;
+  }
+  InstructionPairPtr::Ptr outOfBoundAcc = OutOfBoundsAccessChecker();
+  if (outOfBoundAcc) {
+    return outOfBoundAcc;
+  }
+  return {};
+}
+
+MallocInfo::MallocInfo(Instruction *Inst) {
+  mallocInst = Inst;
+//  errs() << "malloc: " << *mallocInst << "\n";
+  size = mallocInst->getOperand(0);
+//  errs() << "size: " << *size << "\n";
+  if (auto *sizeInst = dyn_cast<Instruction>(size)) {
+//    errs() << "CAN cast to instruction\n";
+  }
 }
 
 };

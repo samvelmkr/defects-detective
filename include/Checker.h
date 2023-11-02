@@ -10,11 +10,18 @@ namespace llvm {
 
 class InstructionPairPtr {
 public:
-  using Ptr = std::shared_ptr<std::pair<Instruction*, Instruction*>>;
+  using Ptr = std::shared_ptr<std::pair<Instruction *, Instruction *>>;
 
-  static Ptr makePair(Instruction* inst1, Instruction* inst2) {
-    return std::make_shared<std::pair<Instruction*, Instruction*>>(inst1, inst2);
+  static Ptr makePair(Instruction *inst1, Instruction *inst2) {
+    return std::make_shared<std::pair<Instruction *, Instruction *>>(inst1, inst2);
   }
+};
+
+class MallocInfo {
+public:
+  Instruction *mallocInst;
+  Value *size;
+  MallocInfo(Instruction *mallocInst);
 };
 
 enum CheckerMaps {
@@ -69,6 +76,8 @@ public:
   static unsigned int getFormatStringSize(GlobalVariable *var);
 
   static bool isScanfCall(Instruction *Inst);
+  InstructionPairPtr::Ptr ScanfValidation();
+  InstructionPairPtr::Ptr OutOfBoundsAccessChecker();
   InstructionPairPtr::Ptr BuffOverflowChecker(Function *Func);
 };
 
