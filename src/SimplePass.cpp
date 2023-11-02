@@ -43,15 +43,13 @@ unsigned SimplePass::getInstructionLine(const Instruction *Inst) {
   if (DILocation *Location = Inst->getDebugLoc()) {
     return Location->getLine();
   } else {
-    errs() << *Inst << "\n";
     const Function* Func = Inst->getFunction();
     for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
       if (auto* dbgDeclare = dyn_cast<DbgDeclareInst>(&*InstIt)) {
-        errs() << "found " << *dbgDeclare << " | " << dbgDeclare->getDebugLoc().getLine() << "\n";
-        errs() << "\top: " << *dbgDeclare->getOperand(0) << "\n";
-        errs() << "\topval: " << *dbgDeclare->getAddress() << "\n";
-
-
+        auto* declaredInst = dyn_cast<Instruction>(dbgDeclare->getAddress());
+        if (declaredInst && declaredInst == Inst) {
+          return dbgDeclare->getDebugLoc().getLine();
+        }
       }
     }
   }
@@ -127,7 +125,6 @@ void SimplePass::analyze(Module &M) {
     }
 
     if (InstructionPairPtr::Ptr bofLoc = analyzer.BuffOverflowChecker(&Func)) {
-      errs() << *bofLoc->first << " | "  << *bofLoc->second << "\n";
       SmallVector<std::pair<std::string, unsigned>> Trace = createBOFTrace(bofLoc->first, bofLoc->second);
       GenSarif.addResult(BugReport(Trace, "buffer-overflow", 1));
     }
