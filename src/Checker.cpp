@@ -198,7 +198,7 @@ bool Checker::hasMallocFreePath(Instruction *startInst) {
 
   std::function<bool(Instruction *)> terminationCondition;
   if (structField) {
-    terminationCondition = [&reachedAlloca, &reachedGEP](Instruction *inst) {
+    terminationCondition = [startInst, &reachedAlloca, &reachedGEP, this](Instruction *inst) {
       if (inst->getOpcode() == Instruction::Alloca) {
         reachedAlloca = true;
       }
@@ -206,13 +206,17 @@ bool Checker::hasMallocFreePath(Instruction *startInst) {
         reachedGEP = true;
       }
       if (reachedAlloca && reachedGEP && isFreeCall(inst)) {
+        InstructionPairPtr pair = InstructionPairPtr::makePair(startInst, inst);
+        MallocFreePairs.push_back(pair);
         return true;
       }
       return false;
     };
   } else {
-    terminationCondition = [](Instruction *inst) {
+    terminationCondition = [startInst, this](Instruction *inst) {
       if (isFreeCall(inst)) {
+        InstructionPairPtr pair = InstructionPairPtr::makePair(startInst, inst);
+        MallocFreePairs.push_back(pair);
         return true;
       }
       return false;
@@ -264,6 +268,29 @@ bool Checker::DFS(CheckerMaps MapID,
     }
   }
   return false;
+}
+
+//===--------------------------------------------------------------------===//
+// Use after free checker.
+//===--------------------------------------------------------------------===//
+
+InstructionPairPtr::Ptr Checker::UseAfterFreeChecker() {
+  for (auto &pair : MallocFreePairs) {
+    errs() << "m: " << *pair.get()->first << " f: " << *pair.get()->second << "\n";
+
+    Instruction *mallocInst = pair.get()->first;
+    Instruction *freeInst = pair.get()->second;
+    Instruction* startInst = FlowMap.at(freeInst);
+    DFS(CheckerMaps::FlowMap, freeInst, [mallocInst, this](Instruction *inst) {
+      if (buildBackwardDependencyPath(inst, mallocInst)) {
+        errs() << "use after free: " << *inst << "\n";
+        return true;
+      }
+      return false;
+    });
+  }
+
+  return {};
 }
 
 //===--------------------------------------------------------------------===//
