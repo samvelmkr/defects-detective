@@ -265,6 +265,7 @@ bool Checker::DFS(CheckerMaps MapID,
   }
   return false;
 }
+
 //===--------------------------------------------------------------------===//
 // Buffer overflow checker.
 //===--------------------------------------------------------------------===//
@@ -351,7 +352,7 @@ InstructionPairPtr::Ptr Checker::OutOfBoundsAccessChecker() {
   return {};
 }
 
-InstructionPairPtr::Ptr Checker::BuffOverflowChecker(llvm::Function *Func) {
+InstructionPairPtr::Ptr Checker::BuffOverflowChecker() {
   InstructionPairPtr::Ptr scanfBOF = ScanfValidation();
   if (scanfBOF) {
     return scanfBOF;
@@ -362,7 +363,6 @@ InstructionPairPtr::Ptr Checker::BuffOverflowChecker(llvm::Function *Func) {
   }
   return {};
 }
-
 MallocInfo::MallocInfo(Instruction *Inst) {
   mallocInst = Inst;
 //  errs() << "malloc: " << *mallocInst << "\n";

@@ -124,7 +124,7 @@ void SimplePass::analyze(Module &M) {
       GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
     }
 
-    if (InstructionPairPtr::Ptr bofLoc = analyzer.BuffOverflowChecker(&Func)) {
+    if (InstructionPairPtr::Ptr bofLoc = analyzer.BuffOverflowChecker()) {
       SmallVector<std::pair<std::string, unsigned>> Trace = createBOFTrace(bofLoc->first, bofLoc->second);
       GenSarif.addResult(BugReport(Trace, "buffer-overflow", 1));
     }

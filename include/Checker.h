@@ -78,7 +78,7 @@ public:
   static bool isScanfCall(Instruction *Inst);
   InstructionPairPtr::Ptr ScanfValidation();
   InstructionPairPtr::Ptr OutOfBoundsAccessChecker();
-  InstructionPairPtr::Ptr BuffOverflowChecker(Function *Func);
+  InstructionPairPtr::Ptr BuffOverflowChecker();
 };
 
 };
