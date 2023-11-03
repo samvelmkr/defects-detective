@@ -26,7 +26,7 @@ public:
   static unsigned getInstructionLine(const Instruction *Inst);
 
   SmallVector<std::pair<std::string, unsigned>> createMemLeakTrace(Instruction* mallocCall);
-  SmallVector<std::pair<std::string, unsigned>> createBOFTrace(Instruction *allocInst, Instruction *instBOF);
+  SmallVector<std::pair<std::string, unsigned>> createTraceOfPairInst(Instruction *allocInst, Instruction *instBOF);
   };
 
 #endif // SIMPLE_PASS_H

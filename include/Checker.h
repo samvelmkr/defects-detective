@@ -78,6 +78,13 @@ public:
   bool hasMallocFreePath(Instruction *PInstruction);
 
   //===--------------------------------------------------------------------===//
+  // Use after free checker.
+  //===--------------------------------------------------------------------===//
+
+  bool isSetToNullPointer(Instruction* Inst);
+  InstructionPairPtr::Ptr UseAfterFreeChecker();
+
+  //===--------------------------------------------------------------------===//
   // Buffer overflow checker.
   //===--------------------------------------------------------------------===//
   static unsigned int getArraySize(AllocaInst *pointerArray);
@@ -87,12 +94,6 @@ public:
   InstructionPairPtr::Ptr ScanfValidation();
   InstructionPairPtr::Ptr OutOfBoundsAccessChecker();
   InstructionPairPtr::Ptr BuffOverflowChecker();
-
-  //===--------------------------------------------------------------------===//
-  // Use after free checker.
-  //===--------------------------------------------------------------------===//
-
-  InstructionPairPtr::Ptr UseAfterFreeChecker();
 };
 
 };

@@ -274,22 +274,43 @@ bool Checker::DFS(CheckerMaps MapID,
 // Use after free checker.
 //===--------------------------------------------------------------------===//
 
-InstructionPairPtr::Ptr Checker::UseAfterFreeChecker() {
-  for (auto &pair : MallocFreePairs) {
-    errs() << "m: " << *pair.get()->first << " f: " << *pair.get()->second << "\n";
+bool Checker::isSetToNullPointer(Instruction *Inst) {
+  if (Inst->getOpcode() == Instruction::Store) {
+    return isa<ConstantPointerNull>(Inst->getOperand(0));
+  }
+  if (ForwardDependencyMap.at(Inst).size() != 1) {
+    return false;
+  }
+  Instruction* nextDepInst = *ForwardDependencyMap.at(Inst).begin();
+  if (nextDepInst->getOpcode() == Instruction::Store) {
+    return isa<ConstantPointerNull>(Inst->getOperand(0));
+  }
+  return false;
+}
 
+InstructionPairPtr::Ptr Checker::UseAfterFreeChecker() {
+  Instruction* useAfterFreeInst = nullptr;
+
+  for (auto &pair : MallocFreePairs) {
     Instruction *mallocInst = pair.get()->first;
     Instruction *freeInst = pair.get()->second;
-    Instruction* startInst = FlowMap.at(freeInst);
-    DFS(CheckerMaps::FlowMap, freeInst, [mallocInst, this](Instruction *inst) {
-      if (buildBackwardDependencyPath(inst, mallocInst)) {
-        errs() << "use after free: " << *inst << "\n";
+
+    bool foundUsageAfterFree = DFS(CheckerMaps::FlowMap, freeInst, [mallocInst, freeInst, &useAfterFreeInst, this](Instruction *inst) {
+      if (inst != freeInst && buildBackwardDependencyPath(inst, mallocInst)) {
+        useAfterFreeInst = inst;
         return true;
       }
       return false;
     });
-  }
 
+    if (!foundUsageAfterFree) {
+      continue;
+    }
+
+    if (useAfterFreeInst && !isSetToNullPointer(useAfterFreeInst)) {
+      return InstructionPairPtr::makePair(freeInst, useAfterFreeInst);
+    }
+  }
   return {};
 }
 

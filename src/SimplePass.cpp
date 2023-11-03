@@ -86,17 +86,17 @@ SmallVector<std::pair<std::string, unsigned>> SimplePass::createMemLeakTrace(Ins
   return Trace;
 }
 
-SmallVector<std::pair<std::string, unsigned>> SimplePass::createBOFTrace(Instruction *allocInst, Instruction *instBOF) {
-  if (!allocInst || !instBOF) {
+SmallVector<std::pair<std::string, unsigned>> SimplePass::createTraceOfPairInst(Instruction *start, Instruction *end) {
+  if (!start || !end) {
     return {};
   }
   SmallVector<std::pair<std::string, unsigned>> Trace;
 
-  std::string FilePath = getFunctionLocation(allocInst->getFunction());
-  unsigned arrDeclarationLine = getInstructionLine(allocInst);
-  unsigned BOFLine = getInstructionLine(instBOF);
-  Trace.emplace_back(FilePath, arrDeclarationLine);
-  Trace.emplace_back(FilePath, BOFLine);
+  std::string FilePath = getFunctionLocation(start->getFunction());
+  unsigned startLine = getInstructionLine(start);
+  unsigned endLIne = getInstructionLine(end);
+  Trace.emplace_back(FilePath, startLine);
+  Trace.emplace_back(FilePath, endLIne);
   return Trace;
 }
 
@@ -124,14 +124,14 @@ void SimplePass::analyze(Module &M) {
       GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
     }
 
-    analyzer.UseAfterFreeChecker();
-//    analyzer.printMap("dep");
-//    errs() << "-----------------\n";
-//    analyzer.printMap("back_dep");
+    if (InstructionPairPtr::Ptr uafLoc = analyzer.UseAfterFreeChecker()) {
+      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(uafLoc->first, uafLoc->second);
+      GenSarif.addResult(BugReport(Trace, "use-after-free", 0));
+    }
 
     if (InstructionPairPtr::Ptr bofLoc = analyzer.BuffOverflowChecker()) {
-      SmallVector<std::pair<std::string, unsigned>> Trace = createBOFTrace(bofLoc->first, bofLoc->second);
-      GenSarif.addResult(BugReport(Trace, "buffer-overflow", 1));
+      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(bofLoc->first, bofLoc->second);
+      GenSarif.addResult(BugReport(Trace, "buffer-overflow", 2));
     }
 
     GenSarif.save();
