@@ -117,14 +117,22 @@ void SimplePass::analyze(Module &M) {
     Checker analyzer;
     analyzer.collectDependencies(&Func);
 
+//    analyzer.printMap(CheckerMaps::ForwardFlowMap);
+//    errs() << "----------------------------------------\n";
+//    analyzer.printMap(CheckerMaps::ForwardDependencyMap);
+//    errs() << "----------------------------------------\n";
+//    analyzer.printMap(CheckerMaps::BackwardDependencyMap);
+//    errs() << "----------------------------------------\n";
+
     Sarif GenSarif;
 
-    if (Instruction *mlLoc = analyzer.MallocFreePathChecker()) {
+    if (Instruction *mlLoc = analyzer.MemoryLeakChecker()) {
       SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(mlLoc);
       GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
     }
 
     if (InstructionPairPtr::Ptr uafLoc = analyzer.UseAfterFreeChecker()) {
+      errs() << *uafLoc->first << " | " << *uafLoc->second << "\n";
       SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(uafLoc->first, uafLoc->second);
       GenSarif.addResult(BugReport(Trace, "use-after-free", 0));
     }
