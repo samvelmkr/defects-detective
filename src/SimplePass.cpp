@@ -126,10 +126,11 @@ void SimplePass::analyze(Module &M) {
 
     Sarif GenSarif;
 
-    if (Instruction *mlLoc = analyzer.MemoryLeakChecker()) {
-      SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(mlLoc);
-      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
-    }
+    analyzer.MemoryLeakChecker();
+//    if (Instruction *mlLoc = analyzer.MemoryLeakChecker()) {
+//      SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(mlLoc);
+//      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
+//    }
 
     if (InstructionPairPtr::Ptr uafLoc = analyzer.UseAfterFreeChecker()) {
       errs() << *uafLoc->first << " | " << *uafLoc->second << "\n";
