@@ -107,7 +107,10 @@ public:
     Offset = offset;
     ParentInst = parentInst;
   }
-  bool isMallocedWithOffset() {
+  size_t getOffset() const {
+    return Offset;
+  }
+  bool isMallocedWithOffset() const {
     return Offset != SIZE_MAX;
   }
   void setMallocCall(Instruction *mallocInst) {
@@ -116,13 +119,16 @@ public:
   void setFreeCall(Instruction *freeInst) {
     MallocFree.second = freeInst;
   }
-  Instruction *getMallocCall() {
+  Instruction *getMallocCall() const {
     return MallocFree.first;
   }
-  Instruction *getFreeCall(Instruction *mallocInst) {
+  Instruction *getFreeCall() const {
     return MallocFree.second;
   }
-  bool isDeallocated() {
+  Instruction* getBaseInst() {
+    return BaseInst;
+  }
+  bool isDeallocated() const {
     return MallocFree.second != nullptr;
   }
 };
@@ -146,7 +152,7 @@ private:
   std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructInfos;
   std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructFieldInfos;
 
-  std::vector<std::shared_ptr<MallocedObject>> MallocedObjs;
+  std::unordered_map<Instruction*, std::shared_ptr<MallocedObject>> MallocedObjs;
 public:
   static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
                       Instruction *Source, Instruction *Destination);
@@ -176,12 +182,11 @@ public:
   //===--------------------------------------------------------------------===//
   // Memory leak checker.
   //===--------------------------------------------------------------------===//
-
+  void findAllPathsFromInstToRet(Instruction* startInst);
   InstructionPairPtr::Ptr MemoryLeakChecker();
 //  MallocType getMallocType(Instruction *mallocInst);
-  MemAllocationInfo *hasMallocFreePath(MemAllocationInfo *Info);
-  MemAllocationInfo *hasMallocFreePathForStruct(MemAllocationInfo *Info);
-  MemAllocationInfo *hasMallocFreePathForStructField(MemAllocationInfo *Info);
+  bool hasMallocFreePath(MallocedObject *Obj);
+  bool hasMallocFreePathWithOffset(MallocedObject *Obj);
 
   //===--------------------------------------------------------------------===//
   // Use after free checker.

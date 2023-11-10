@@ -120,7 +120,7 @@ void Checker::collectMallocedObjs() {
       if (curr->getOpcode() == Instruction::Alloca) {
         auto Obj = std::make_shared<MallocedObject>(curr);
         Obj->setMallocCall(callInst);
-        MallocedObjs.emplace_back(Obj);
+        MallocedObjs[curr] = Obj;
         return true;
       }
       if (curr->getOpcode() == Instruction::GetElementPtr) {
@@ -132,8 +132,10 @@ void Checker::collectMallocedObjs() {
         auto *gep = dyn_cast<GetElementPtrInst>(curr);
         gep->accumulateConstantOffset(M->getDataLayout(), accumulateOffset);
 
-        Instruction* nextInst = *(ForwardDependencyMap[curr].begin());
+        // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
+        Instruction *nextInst = *(ForwardDependencyMap[curr].begin());
         Obj->setOffset(nextInst, accumulateOffset.getZExtValue());
+        MallocedObjs[curr] = Obj;
         return true;
       }
       return false;
@@ -223,10 +225,54 @@ void Checker::printMap(CheckerMaps MapID) {
 //  return MallocType::SimpleMemAllocation;
 //}
 
+void Checker::findAllPathsFromInstToRet(Instruction *startInst) {
+  std::vector<std::vector<Instruction*>> Paths;
+
+  std::unordered_set<Instruction *> visitedNodes;
+  std::stack<Instruction *> dfsStack;
+  dfsStack.push(startInst);
+
+  while (!dfsStack.empty()) {
+    Instruction *currInst = dfsStack.top();
+    dfsStack.pop();
+
+    if (currInst->getOpcode() == Instruction::Ret) {
+      break;
+    }
+    errs() << "CURR: " <<  *currInst << "\n";
+    visitedNodes.insert(currInst);
+
+    for (Instruction *nextInst : ForwardFlowMap[currInst]) {
+      if (visitedNodes.find(nextInst) == visitedNodes.end()) {
+        dfsStack.push(nextInst);
+      }
+    }
+  }
+}
+
 InstructionPairPtr::Ptr Checker::MemoryLeakChecker() {
-//  if (MemAllocInfos.empty()) {
-//    return {};
-//  }
+  if (MallocedObjs.empty()) {
+    return {};
+  }
+  for (auto &ObjEntry : MallocedObjs) {
+    findAllPathsFromInstToRet(ObjEntry.second->getMallocCall());
+  }
+
+  for (auto &ObjEntry : MallocedObjs) {
+    errs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+    errs() << "Base: " << *(ObjEntry.second->getBaseInst()) << "\n";
+    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " <<  ObjEntry.second->isDeallocated() << "\n";
+    if (ObjEntry.second->isMallocedWithOffset()) {
+      hasMallocFreePathWithOffset(ObjEntry.second.get());
+    } else {
+      hasMallocFreePath(ObjEntry.second.get());
+    }
+    errs() << "after work\n";
+    errs() << "Base: " << *(ObjEntry.second->getBaseInst()) << "\n";
+    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " << *(ObjEntry.second->getFreeCall());
+    errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+  }
+
 //  for (auto& InfoPtr : MemAllocInfos) {
 //    MemAllocationInfo *Info = InfoPtr.get();
 //    if (Info->isStructMalloc()) {
@@ -265,102 +311,68 @@ bool Checker::buildBackwardDependencyPath(Instruction *from, Instruction *to) {
   return DFS(CheckerMaps::BackwardDependencyMap, from, [to](Instruction *inst) { return inst == to; });
 }
 
-MemAllocationInfo *Checker::hasMallocFreePathForStruct(MemAllocationInfo *Info) {
-  Instruction* mallocInst = Info->getMallocInst();
-  DFS(CheckerMaps::ForwardDependencyMap, mallocInst, [Info, this](Instruction *curr) {
+//MemAllocationInfo *Checker::hasMallocFreePathForStruct(MemAllocationInfo *Info) {
+//  Instruction *mallocInst = Info->getMallocInst();
+//  DFS(CheckerMaps::ForwardDependencyMap, mallocInst, [Info, this](Instruction *curr) {
+//    if (isFreeCall(curr)) {
+//      Info->setFreeCall(curr);
+////      StructInfos[structName].get()->setMallocScope(pair);
+//      return true;
+//    }
+//    return false;
+//  });
+//
+//  return {};
+//}
+
+bool Checker::hasMallocFreePathWithOffset(MallocedObject *Obj) {
+  auto getOffset = [](GetElementPtrInst *gep) {
+    Module *M = gep->getModule();
+    APInt accumulateOffset;
+    if (gep->accumulateConstantOffset(M->getDataLayout(), accumulateOffset)) {
+      return accumulateOffset.getZExtValue();
+    }
+    return SIZE_MAX;
+  };
+
+  bool reachedAlloca = false;
+  bool reachedGEP = false;
+
+  Instruction *startInst = Obj->getBaseInst();
+
+  return DFS(CheckerMaps::ForwardDependencyMap,
+             startInst,
+             [Obj, &reachedAlloca, &reachedGEP, &getOffset, this](Instruction *curr) {
+               if (curr->getOpcode() == Instruction::Alloca) {
+                 reachedAlloca = true;
+               }
+               if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
+                 auto *gep = dyn_cast<GetElementPtrInst>(curr);
+                 if (Obj->getOffset() == getOffset(gep)) {
+                   reachedGEP = true;
+                 }
+               }
+               if (reachedAlloca && reachedGEP && isFreeCall(curr)) {
+                 Obj->setFreeCall(curr);
+                 return true;
+               }
+               return false;
+             });
+}
+
+bool Checker::hasMallocFreePath(MallocedObject *Obj) {
+  Instruction* mallocInst = Obj->getMallocCall();
+  return DFS(CheckerMaps::ForwardDependencyMap, mallocInst, [Obj, this](Instruction *curr) {
+    if (curr->getOpcode() == Instruction::GetElementPtr) {
+
+    }
     if (isFreeCall(curr)) {
-      Info->setFreeCall(curr);
-//      StructInfos[structName].get()->setMallocScope(pair);
+      Obj->setFreeCall(curr);
       return true;
     }
     return false;
   });
-
-  return {};
 }
-//
-//bool Checker::hasMallocFreePathForStructField(Instruction *mallocInst) {
-//  auto getOffset = [](GetElementPtrInst *gep) {
-//    Module *M = gep->getModule();
-//    APInt accumulateOffset;
-//    if (gep->accumulateConstantOffset(M->getDataLayout(), accumulateOffset)) {
-//      return accumulateOffset.getZExtValue();
-//    }
-//    return SIZE_MAX;
-//  };
-//
-//  bool reachedAlloca = false;
-//  bool reachedGEP = false;
-//  size_t structFieldOffset;
-//
-//  return DFS(CheckerMaps::ForwardDependencyMap, mallocInst,
-//             [mallocInst, &reachedAlloca, &reachedGEP, &structFieldOffset, &getOffset, &structName, this](Instruction *curr) {
-//               if (curr->getOpcode() == Instruction::Alloca) {
-//                 reachedAlloca = true;
-//               }
-//               if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
-//                 auto *gep = dyn_cast<GetElementPtrInst>(curr);
-//                 Type *sourceType = gep->getSourceElementType();
-//                 if (sourceType->isStructTy() && structFieldOffset == getOffset(gep)) {
-//                   reachedGEP = true;
-//                 }
-//               }
-//               if (reachedAlloca && reachedGEP && isFreeCall(curr)) {
-//                 InstructionPairPtr pair = InstructionPairPtr::makePair(mallocInst, curr);
-//                 MallocFreePairs.push_back(pair);
-//                 StructInfos[structName].get()->setFieldMallocScope(structFieldOffset, pair);
-//                 return true;
-//               }
-//               return false;
-//             });
-//}
-//
-//bool Checker::hasMallocFreePath(Instruction *mallocInst) {
-//  bool isMallocStruct = false;
-//  bool isMallocStructField = false;
-//  std::string structName;
-//
-//  for (auto &depInst : ForwardDependencyMap[mallocInst]) {
-//    if (depInst->getOpcode() == Instruction::Alloca) {
-//      auto *allocaInst = dyn_cast<AllocaInst>(depInst);
-//      Type *allocatedType = allocaInst->getAllocatedType();
-//      if (allocatedType->isPointerTy() && allocatedType->getPointerElementType()->isStructTy()) {
-//        auto *structType = dyn_cast<StructType>(allocatedType->getPointerElementType());
-//        structName = structType->getName().str();
-//        isMallocStruct = true;
-//      }
-//      break;
-//    }
-//    if (depInst->getOpcode() == Instruction::GetElementPtr) {
-//      auto *GEP = dyn_cast<GetElementPtrInst>(depInst);
-//      Type *opBasePointer = GEP->getSourceElementType();
-//      if (opBasePointer->isStructTy()) {
-//        isMallocStructField = true;
-//      }
-//      break;
-//    }
-//  }
-//
-//  if (isMallocStructField) {
-//    *isStructField = true;
-//    return hasMallocFreePathForStructField(mallocInst, structName);
-//  }
-//  if (isMallocStruct) {
-//    *isStruct = true;
-//    return hasMallocFreePathForStruct(mallocInst, structName);
-//  }
-//
-//  std::function<bool(Instruction * )> terminationCondition = [mallocInst, this](Instruction *inst) {
-//    if (isFreeCall(inst)) {
-//      InstructionPairPtr pair = InstructionPairPtr::makePair(mallocInst, inst);
-//      MallocFreePairs.push_back(pair);
-//      return true;
-//    }
-//    return false;
-//  };
-//
-//  return DFS(CheckerMaps::ForwardDependencyMap, mallocInst, terminationCondition);
-//}
 
 bool Checker::isFreeCall(Instruction *Inst) {
   if (auto *callInst = dyn_cast<CallInst>(Inst)) {
@@ -372,7 +384,7 @@ bool Checker::isFreeCall(Instruction *Inst) {
 
 bool Checker::DFS(CheckerMaps MapID,
                   Instruction *startInst,
-                  const std::function<bool(Instruction * )> &terminationCondition) {
+                  const std::function<bool(Instruction *)> &terminationCondition) {
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *Map = nullptr;
   switch (MapID) {
   case CheckerMaps::ForwardDependencyMap:Map = &ForwardDependencyMap;
@@ -462,8 +474,8 @@ InstructionPairPtr::Ptr Checker::UseAfterFreeChecker() {
 //===--------------------------------------------------------------------===//
 
 unsigned int Checker::getFormatStringSize(GlobalVariable *var) {
-  if (Constant * formatStringConst = var->getInitializer()) {
-    if (ConstantDataArray * formatArray = dyn_cast<ConstantDataArray>(formatStringConst)) {
+  if (Constant *formatStringConst = var->getInitializer()) {
+    if (ConstantDataArray *formatArray = dyn_cast<ConstantDataArray>(formatStringConst)) {
       StringRef formatString = formatArray->getAsCString();
       std::stringstream ss(formatString.data());
       char c;
