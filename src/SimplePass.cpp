@@ -64,28 +64,6 @@ unsigned SimplePass::getFunctionFirstLine(const Function *Func) {
   return -1;
 }
 
-unsigned SimplePass::getFunctionLastLine(const Function *Func) {
-  const BasicBlock &lastBB = *(--(Func->end()));
-  if (!lastBB.empty()) {
-    return getInstructionLine(&*(--(lastBB.end())));
-  }
-  return -1;
-}
-
-SmallVector<std::pair<std::string, unsigned>> SimplePass::createMemLeakTrace(Instruction *mallocCall) {
-  if (!mallocCall) {
-    return {};
-  }
-  SmallVector<std::pair<std::string, unsigned>> Trace;
-
-  std::string FilePath = getFunctionLocation(mallocCall->getFunction());
-  unsigned mallocLine = getInstructionLine(mallocCall);
-  unsigned expectedFreeLine = getFunctionLastLine(mallocCall->getFunction());
-  Trace.emplace_back(FilePath, mallocLine);
-  Trace.emplace_back(FilePath, expectedFreeLine);
-  return Trace;
-}
-
 SmallVector<std::pair<std::string, unsigned>> SimplePass::createTraceOfPairInst(Instruction *start, Instruction *end) {
   if (!start || !end) {
     return {};
@@ -125,21 +103,24 @@ void SimplePass::analyze(Module &M) {
 //    errs() << "----------------------------------------\n";
 
     Sarif GenSarif;
+    std::pair<Instruction*, Instruction*> mlLoc = analyzer.MemoryLeakChecker();
+    if (mlLoc.first && mlLoc.second) {
+//      errs() << *mlLoc.first << " | " << *mlLoc.second << "\n";
+      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(mlLoc.first, mlLoc.second);
+      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
+    }
 
-    analyzer.MemoryLeakChecker();
-//    if (Instruction *mlLoc = analyzer.MemoryLeakChecker()) {
-//      SmallVector<std::pair<std::string, unsigned>> Trace = createMemLeakTrace(mlLoc);
-//      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
-//    }
-
-    if (InstructionPairPtr::Ptr uafLoc = analyzer.UseAfterFreeChecker()) {
-      errs() << *uafLoc->first << " | " << *uafLoc->second << "\n";
-      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(uafLoc->first, uafLoc->second);
+    std::pair<Instruction*, Instruction*> uafLoc = analyzer.UseAfterFreeChecker();
+    if (uafLoc.first && uafLoc.second) {
+//      errs() << *uafLoc.first << " | " << *uafLoc.second << "\n";
+      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(uafLoc.first, uafLoc.second);
       GenSarif.addResult(BugReport(Trace, "use-after-free", 0));
     }
 
-    if (InstructionPairPtr::Ptr bofLoc = analyzer.BuffOverflowChecker()) {
-      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(bofLoc->first, bofLoc->second);
+    std::pair<Instruction*, Instruction*> bofLoc = analyzer.BuffOverflowChecker();
+    if (bofLoc.first && bofLoc.second) {
+//      errs() << *bofLoc.first << " | " << *bofLoc.second << "\n";
+      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(bofLoc.first, bofLoc.second);
       GenSarif.addResult(BugReport(Trace, "buffer-overflow", 2));
     }
 

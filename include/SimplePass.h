@@ -22,10 +22,8 @@ public:
   std::string getFunctionLocation(const Function *Func);
   SmallVector<std::pair<std::string, unsigned>> getAllFunctionsTrace(Module &M);
   static unsigned getFunctionFirstLine(const Function *Func);
-  static unsigned getFunctionLastLine(const Function *Func);
   static unsigned getInstructionLine(const Instruction *Inst);
 
-  SmallVector<std::pair<std::string, unsigned>> createMemLeakTrace(Instruction* mallocCall);
   SmallVector<std::pair<std::string, unsigned>> createTraceOfPairInst(Instruction *allocInst, Instruction *instBOF);
   };
 

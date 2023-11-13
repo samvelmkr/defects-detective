@@ -10,102 +10,102 @@
 
 namespace llvm {
 
-class InstructionPairPtr {
-public:
-  using Ptr = std::shared_ptr<std::pair<Instruction *, Instruction *>>;
-
-  InstructionPairPtr(Ptr SharedPtr) : ptr(std::move(SharedPtr)) {}
-  static Ptr makePair(Instruction *inst1, Instruction *inst2) {
-    return std::make_shared<std::pair<Instruction *, Instruction *>>(inst1, inst2);
-  }
-  Ptr get() const {
-    return ptr;
-  }
-private:
-  Ptr ptr;
-};
-
-class StructInfo {
-private:
-  struct FieldInfo {
-    InstructionPairPtr memAllocInfo = InstructionPairPtr::makePair(nullptr, nullptr);
-  };
-
-  StructType *type;
-  InstructionPairPtr memAllocInfo = InstructionPairPtr::makePair(nullptr, nullptr);
-  std::unordered_map<size_t, FieldInfo> fieldInfos;
-  AllocaInst *declaration;
-
-public:
-  StructInfo(StructType *structType, AllocaInst *declareInst) {
-    type = structType;
-    declaration = declareInst;
-  }
-
-  void setMallocScope(InstructionPairPtr pair) {
-    memAllocInfo = std::move(pair);
-  }
-
-  void addField(size_t offset) {
-    FieldInfo field;
-    fieldInfos[offset] = field;
-  }
-
-  void setFieldMallocScope(size_t offset, InstructionPairPtr pair) {
-    fieldInfos[offset].memAllocInfo = std::move(pair);
-  }
-
-  size_t getFieldCount() const {
-    return fieldInfos.size();
-  }
-
-//  const FieldInfo &getFieldInfo(size_t index) const {
-//    return fieldInfos[index];
+//class InstructionPairPtr {
+//public:
+//  using Ptr = std::shared_ptr<std::pair<Instruction *, Instruction *>>;
+//
+//  InstructionPairPtr(Ptr SharedPtr) : ptr(std::move(SharedPtr)) {}
+//  static Ptr makePair(Instruction *inst1, Instruction *inst2) {
+//    return std::make_shared<std::pair<Instruction *, Instruction *>>(inst1, inst2);
 //  }
-};
+//  Ptr get() const {
+//    return ptr;
+//  }
+//private:
+//  Ptr ptr;
+//};
 
-class MemAllocationInfo {
-private:
-  InstructionPairPtr MallocFree = InstructionPairPtr::makePair(nullptr, nullptr);
-  size_t offset = SIZE_MAX;
-public:
-  MemAllocationInfo(Instruction *baseInst, Instruction *mallocInst, Instruction *freeInst = nullptr) {
-    MallocFree = InstructionPairPtr::makePair(mallocInst, freeInst);
-  }
-  MemAllocationInfo(MemAllocationInfo *Info) {
-    MallocFree = Info->MallocFree;
-  }
-  void setFreeCall(Instruction *freeInst) {
-    MallocFree = InstructionPairPtr::makePair(MallocFree.get()->first, freeInst);
-  }
-  bool isDeallocated() {
-    return MallocFree.get()->second;
-  }
-  bool isMallocWithOffset() {
-    return offset != SIZE_MAX;
-  }
-  Instruction *getMallocInst() {
-    return MallocFree.get()->first;
-  }
-  Instruction *getFreeInst() {
-    return MallocFree.get()->second;
-  }
-};
+//class StructInfo {
+//private:
+//  struct FieldInfo {
+//    InstructionPairPtr memAllocInfo = InstructionPairPtr::makePair(nullptr, nullptr);
+//  };
+//
+//  StructType *type;
+//  InstructionPairPtr memAllocInfo = InstructionPairPtr::makePair(nullptr, nullptr);
+//  std::unordered_map<size_t, FieldInfo> fieldInfos;
+//  AllocaInst *declaration;
+//
+//public:
+//  StructInfo(StructType *structType, AllocaInst *declareInst) {
+//    type = structType;
+//    declaration = declareInst;
+//  }
+//
+//  void setMallocScope(InstructionPairPtr pair) {
+//    memAllocInfo = std::move(pair);
+//  }
+//
+//  void addField(size_t offset) {
+//    FieldInfo field;
+//    fieldInfos[offset] = field;
+//  }
+//
+//  void setFieldMallocScope(size_t offset, InstructionPairPtr pair) {
+//    fieldInfos[offset].memAllocInfo = std::move(pair);
+//  }
+//
+//  size_t getFieldCount() const {
+//    return fieldInfos.size();
+//  }
+//
+////  const FieldInfo &getFieldInfo(size_t index) const {
+////    return fieldInfos[index];
+////  }
+//};
+
+//class MemAllocationInfo {
+//private:
+//  InstructionPairPtr MallocFree = InstructionPairPtr::makePair(nullptr, nullptr);
+//  size_t offset = SIZE_MAX;
+//public:
+//  MemAllocationInfo(Instruction *baseInst, Instruction *mallocInst, Instruction *freeInst = nullptr) {
+//    MallocFree = InstructionPairPtr::makePair(mallocInst, freeInst);
+//  }
+//  MemAllocationInfo(MemAllocationInfo *Info) {
+//    MallocFree = Info->MallocFree;
+//  }
+//  void setFreeCall(Instruction *freeInst) {
+//    MallocFree = InstructionPairPtr::makePair(MallocFree.get()->first, freeInst);
+//  }
+//  bool isDeallocated() {
+//    return MallocFree.get()->second;
+//  }
+//  bool isMallocWithOffset() {
+//    return offset != SIZE_MAX;
+//  }
+//  Instruction *getMallocInst() {
+//    return MallocFree.get()->first;
+//  }
+//  Instruction *getFreeInst() {
+//    return MallocFree.get()->second;
+//  }
+//};
 
 class MallocedObject {
 private:
   Instruction *BaseInst;
   size_t Offset = SIZE_MAX;
-  Instruction *ParentInst;
-  std::pair<Instruction *, Instruction *> MallocFree;
+  MallocedObject *ParentObj;
+  std::pair<Instruction *, Instruction *> MallocFree = {nullptr, nullptr};
 public:
   MallocedObject(Instruction *Inst) {
     BaseInst = Inst;
   }
   MallocedObject(MallocedObject *Obj) {}
-  void setOffset(Instruction *parentInst, size_t offset) {
+  void setOffset(MallocedObject *parentObj, size_t offset) {
     Offset = offset;
-    ParentInst = parentInst;
+    ParentObj = parentObj;
   }
   size_t getOffset() const {
     return Offset;
@@ -119,13 +119,16 @@ public:
   void setFreeCall(Instruction *freeInst) {
     MallocFree.second = freeInst;
   }
+  MallocedObject *getParent() const {
+    return ParentObj;
+  }
   Instruction *getMallocCall() const {
     return MallocFree.first;
   }
   Instruction *getFreeCall() const {
     return MallocFree.second;
   }
-  Instruction* getBaseInst() {
+  Instruction *getBaseInst() {
     return BaseInst;
   }
   bool isDeallocated() const {
@@ -149,10 +152,12 @@ private:
 
   std::unordered_map<std::string, std::unordered_set<Instruction *>> callInstructions;
 
-  std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructInfos;
-  std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructFieldInfos;
+//  std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructInfos;
+//  std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructFieldInfos;
 
-  std::unordered_map<Instruction*, std::shared_ptr<MallocedObject>> MallocedObjs;
+  std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> MallocedObjs;
+
+  Instruction *RET;
 public:
   static void addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
                       Instruction *Source, Instruction *Destination);
@@ -168,12 +173,17 @@ public:
 
   void updateDependencies();
   void collectMallocedObjs();
+  std::vector<std::vector<Instruction *>> findAllPaths(Instruction *start, Instruction *end);
 
+  void collectPaths(std::unordered_set<Instruction *> &visitedInsts,
+                    std::vector<std::vector<Instruction *>> &paths,
+                    std::vector<Instruction *> &path,
+                    Instruction *from, Instruction *to);
   bool DFS(CheckerMaps MapID, Instruction *startInst,
-           const std::function<bool(Instruction *)> &terminationCondition);
+           const std::function<bool(Instruction *)> &terminationCondition,
+           const std::function<bool(Instruction *)> &continueCondition = nullptr);
 
-
-  bool buildBackwardDependencyPath(Instruction *from, Instruction *to);
+  bool hasPath(CheckerMaps MapID, Instruction *from, Instruction *to);
 
   void printMap(CheckerMaps MapID);
   static bool isMallocCall(Instruction *PInstruction);
@@ -182,18 +192,17 @@ public:
   //===--------------------------------------------------------------------===//
   // Memory leak checker.
   //===--------------------------------------------------------------------===//
-  void findAllPathsFromInstToRet(Instruction* startInst);
-  InstructionPairPtr::Ptr MemoryLeakChecker();
-//  MallocType getMallocType(Instruction *mallocInst);
-  bool hasMallocFreePath(MallocedObject *Obj);
-  bool hasMallocFreePathWithOffset(MallocedObject *Obj);
+  bool hasMallocFreePath(MallocedObject *Obj, Instruction *freeInst);
+  bool hasMallocFreePathWithOffset(MallocedObject *Obj, Instruction *freeInst);
+  std::pair<Instruction *, Instruction *> hasCorrespondingFree(std::vector<Instruction *> &path);
+  std::pair<Instruction *, Instruction *> MemoryLeakChecker();
 
   //===--------------------------------------------------------------------===//
   // Use after free checker.
   //===--------------------------------------------------------------------===//
 
   bool isUseAfterFree(Instruction *Inst);
-  InstructionPairPtr::Ptr UseAfterFreeChecker();
+  std::pair<Instruction *, Instruction *> UseAfterFreeChecker();
 
   //===--------------------------------------------------------------------===//
   // Buffer overflow checker.
@@ -202,9 +211,9 @@ public:
   static unsigned int getFormatStringSize(GlobalVariable *var);
 
   static bool isScanfCall(Instruction *Inst);
-  InstructionPairPtr::Ptr ScanfValidation();
-  InstructionPairPtr::Ptr OutOfBoundsAccessChecker();
-  InstructionPairPtr::Ptr BuffOverflowChecker();
+  std::pair<Instruction *, Instruction *> ScanfValidation();
+  std::pair<Instruction *, Instruction *> OutOfBoundsAccessChecker();
+  std::pair<Instruction *, Instruction *> BuffOverflowChecker();
 };
 
 };

@@ -3,6 +3,7 @@
 #include "llvm/IR/GlobalVariable.h"
 
 #include <sstream>
+#include <queue>
 #include <stack>
 
 namespace llvm {
@@ -75,6 +76,11 @@ void Checker::collectDependencies(Function *Func) {
     }
   }
 
+  const BasicBlock &lastBB = *(--(Func->end()));
+  if (!lastBB.empty()) {
+    RET = const_cast<Instruction *>(&*(--(lastBB.end())));
+  }
+
   // GEP validation
   updateDependencies();
 
@@ -120,7 +126,7 @@ void Checker::collectMallocedObjs() {
       if (curr->getOpcode() == Instruction::Alloca) {
         auto Obj = std::make_shared<MallocedObject>(curr);
         Obj->setMallocCall(callInst);
-        MallocedObjs[curr] = Obj;
+        MallocedObjs[callInst] = Obj;
         return true;
       }
       if (curr->getOpcode() == Instruction::GetElementPtr) {
@@ -134,8 +140,9 @@ void Checker::collectMallocedObjs() {
 
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
         Instruction *nextInst = *(ForwardDependencyMap[curr].begin());
-        Obj->setOffset(nextInst, accumulateOffset.getZExtValue());
-        MallocedObjs[curr] = Obj;
+        auto
+        Obj->setOffset(MallocedObject(nextInst), accumulateOffset.getZExtValue());
+        MallocedObjs[callInst] = Obj;
         return true;
       }
       return false;
@@ -171,6 +178,10 @@ void Checker::constructFlow(Function *Func) {
       }
     }
   }
+}
+
+bool Checker::hasPath(CheckerMaps MapID, Instruction *from, Instruction *to) {
+  return DFS(MapID, from, [to](Instruction *inst) { return inst == to; });
 }
 
 void Checker::printMap(CheckerMaps MapID) {
@@ -225,54 +236,343 @@ void Checker::printMap(CheckerMaps MapID) {
 //  return MallocType::SimpleMemAllocation;
 //}
 
-void Checker::findAllPathsFromInstToRet(Instruction *startInst) {
-  std::vector<std::vector<Instruction*>> Paths;
+//void Checker::findAllPathsFromInstToRet(Instruction *startInst) {
+//  std::vector<std::vector<Instruction*>> Paths;
+//
+//  std::unordered_set<Instruction *> visitedNodes;
+//  std::stack<Instruction *> dfsStack;
+//  dfsStack.push(startInst);
+//
+//  while (!dfsStack.empty()) {
+//    Instruction *currInst = dfsStack.top();
+//    dfsStack.pop();
+//
+//    if (currInst->getOpcode() == Instruction::Ret) {
+//      errs() << "####################\n";
+//      break;
+//    }
+//    errs() << "CURR: " <<  *currInst << "\n";
+//    visitedNodes.insert(currInst);
+//
+//
+//    for (Instruction *nextInst : ForwardFlowMap[currInst]) {
+//      if (visitedNodes.find(nextInst) == visitedNodes.end()) {
+//        dfsStack.push(nextInst);
+//      }
+//    }
+//  }
+//}
 
-  std::unordered_set<Instruction *> visitedNodes;
-  std::stack<Instruction *> dfsStack;
-  dfsStack.push(startInst);
 
-  while (!dfsStack.empty()) {
-    Instruction *currInst = dfsStack.top();
-    dfsStack.pop();
+//void Checker::dfs(Instruction *current,
+//                  Instruction *end,
+//                  std::vector<Instruction *> &path,
+//                  std::unordered_set<int> &visited) {
+//  path.push_back(current);
+//  visited.insert(current);
+//
+//  if (current == end) {
+//    // Print or process the path as needed.
+//    for (int vertex : path) {
+//      errs() << vertex << " ";
+//    }
+//    std::cout << std::endl;
+//  } else {
+//    auto range = edges.equal_range(current);
+//    for (auto it = range.first; it != range.second; ++it) {
+//      int neighbor = it->second;
+//      if (visited.find(neighbor) == visited.end()) {
+//        dfs(neighbor, end, path, visited);
+//      }
+//    }
+//  }
+//
+//  path.pop_back();
+//  visited.erase(current);
+//}
 
-    if (currInst->getOpcode() == Instruction::Ret) {
-      break;
+//void Checker::findPaths(std::vector<std::vector<Instruction*>>& paths, std::vector<Instruction*>& path,
+//                        Instruction* from, Instruction* to) {
+//    if (from == to) {
+//      paths.push_back(path);
+//      return;
+//    }
+//
+//    for (Instruction *nextInst : ForwardFlowMap[from]) {
+//      path.push_back(to);
+//      findPaths(paths, path, from, answer[to][p]);
+//      path.pop_back();
+//    }
+//  }
+//}
+
+// TODO: write iterative algorithm to avoid stack overflow
+void Checker::collectPaths(std::unordered_set<Instruction *> &visitedInsts,
+                           std::vector<std::vector<Instruction *>> &paths,
+                           std::vector<Instruction *> &currentPath,
+                           Instruction *from,
+                           Instruction *to) {
+
+  if (visitedInsts.find(from) != visitedInsts.end()) {
+    return;
+  }
+  visitedInsts.insert(from);
+  currentPath.push_back(from);
+
+  if (from == to) {
+    paths.push_back(currentPath);
+    visitedInsts.erase(from);
+    currentPath.pop_back();
+    return;
+  }
+
+  for (Instruction *nextInst : ForwardFlowMap[from]) {
+    collectPaths(visitedInsts, paths, currentPath, nextInst, to);
+  }
+  currentPath.pop_back();
+  visitedInsts.erase(from);
+}
+
+void find_paths2(std::vector<std::vector<int>> &paths,
+                 std::vector<int> &path,
+                 std::vector<std::vector<int>> &answer,
+                 int from,
+                 int to) {
+
+  std::stack<int> s_path;
+  std::stack<int> s_index;
+  s_path.push(from);
+  s_index.push(0);
+
+  while (!s_path.empty()) {
+    int vertex = s_path.top();
+    int ind = s_index.top();
+    path.push_back(vertex);
+
+    if (vertex == to) {
+      paths.push_back(path);
     }
-    errs() << "CURR: " <<  *currInst << "\n";
-    visitedNodes.insert(currInst);
 
-    for (Instruction *nextInst : ForwardFlowMap[currInst]) {
-      if (visitedNodes.find(nextInst) == visitedNodes.end()) {
-        dfsStack.push(nextInst);
+    if (ind < answer[vertex].size() &&
+        answer[vertex][ind] != -1) {
+
+      int tmp = answer[vertex][ind];
+      s_path.push(tmp);
+      s_index.push(0);
+    } else {
+      s_path.pop();
+      s_index.pop();
+      path.pop_back();
+      if (s_path.empty()) {
+        break;
       }
+
+      vertex = s_path.top();
+      ind = s_index.top();
+      ++ind;
+
+      s_path.pop();
+      s_index.pop();
+      path.pop_back();
+
+      s_path.push(vertex);
+      s_index.push(ind);
     }
   }
 }
 
-InstructionPairPtr::Ptr Checker::MemoryLeakChecker() {
+// Function to find all paths from Instruction A to Instruction B using DFS.
+//std::vector<std::vector<Instruction*>> Checker::findAllPaths(Instruction* start, Instruction* end) {
+//  // Vector to store all paths.
+//  std::vector<std::vector<Instruction*>> allPaths;
+//
+//  // Stack to perform non-recursive DFS.
+//  std::stack<std::pair<Instruction*, std::vector<Instruction*>>> pathStack;
+//
+//  // Set to keep track of visited instructions.
+//  std::unordered_set<Instruction *> visitedInsts;
+//
+//  // Initialize the stack with the start node (Instruction A).
+//  errs() << "{" << *start <<  "}, {" << *start << "}}\n";
+//  pathStack.push({start, {start}});
+//
+//  while (!pathStack.empty()) {
+//    auto currentPair = pathStack.top();
+//    pathStack.pop();
+//
+//    Instruction* currentInst = currentPair.first;
+//    std::vector<Instruction*> currentPath = currentPair.second;
+//
+//    // Mark the current instruction as visited.
+//    visitedInsts.insert(currentInst);
+//
+//    // Check if the current instruction is the target (Instruction B).
+//    if (currentInst == end) {
+//      // If yes, add the current path to the list of all paths.
+//      allPaths.push_back(currentPath);
+//      currentPath.pop_back();
+//      visitedInsts.erase(currentInst);
+//      continue;
+//    }
+//
+//    // Iterate over the successors of the current instruction.
+//    for (Instruction *nextInst : ForwardFlowMap[currentInst]) {
+//      // Check if the successor is not visited to avoid cycles.
+//      if (visitedInsts.find(nextInst) == visitedInsts.end()) {
+//        // Create a new path by extending the current path with the successor.
+//        std::vector<Instruction*> newPath = currentPath;
+//        newPath.push_back(nextInst);
+//
+//        // Push the successor and the new path to the stack.
+//        errs() << "{" << *nextInst <<  "}, {";
+//        for (auto& inst: newPath) {
+//          errs() << *inst << " ";
+//        }
+//        errs() << "}}\n";
+//        pathStack.push({nextInst, newPath});
+//      }
+//    }
+//  }
+//
+//  return allPaths;
+//}
+
+bool Checker::hasMallocFreePath(MallocedObject *Obj, Instruction *freeInst) {
+  Instruction *startInst = Obj->getBaseInst();
+  return DFS(CheckerMaps::ForwardDependencyMap,
+             startInst,
+             // Termination condition
+             [Obj, freeInst](Instruction *curr) {
+               if (curr == freeInst) {
+                 Obj->setFreeCall(freeInst);
+                 return true;
+               }
+               return false;
+             },
+             // Continue condition
+             [](Instruction *curr) {
+               if (curr->getOpcode() == Instruction::GetElementPtr) {
+                 return true;
+               }
+               return false;
+             });
+}
+
+bool Checker::hasMallocFreePathWithOffset(MallocedObject *Obj, Instruction *freeInst) {
+  auto getOffset = [](GetElementPtrInst *gep) {
+    Module *M = gep->getModule();
+    APInt accumulateOffset;
+    if (gep->accumulateConstantOffset(M->getDataLayout(), accumulateOffset)) {
+      return accumulateOffset.getZExtValue();
+    }
+    return SIZE_MAX;
+  };
+
+  bool reachedFirstGEP = false;
+  bool reachedAlloca = false;
+  bool reachedSecondGEP = false;
+
+  Instruction *startInst = Obj->getBaseInst();
+
+  return DFS(CheckerMaps::ForwardDependencyMap,
+             startInst,
+             [Obj, &reachedAlloca, &reachedFirstGEP, &getOffset, &reachedSecondGEP, freeInst](Instruction *curr) {
+               if (curr->getOpcode() == Instruction::GetElementPtr) {
+                 auto *gep = dyn_cast<GetElementPtrInst>(curr);
+                 if (Obj->getOffset() == getOffset(gep)) {
+                   reachedFirstGEP = true;
+                 }
+               }
+               if (reachedFirstGEP && curr->getOpcode() == Instruction::Alloca) {
+                 reachedAlloca = true;
+               }
+               if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
+                 auto *gep = dyn_cast<GetElementPtrInst>(curr);
+                 if (Obj->getOffset() == getOffset(gep)) {
+                   reachedSecondGEP = true;
+                 }
+               }
+               if (reachedSecondGEP && isFreeCall(curr) && curr == freeInst) {
+                 Obj->setFreeCall(freeInst);
+                 return true;
+               }
+               return false;
+             });
+}
+
+std::pair<Instruction*, Instruction*> Checker::hasCorrespondingFree(std::vector<Instruction *> &Path) {
+  Instruction *mallocInst = Path[0];
+
+  bool mallocWithOffset = MallocedObjs[mallocInst]->isMallocedWithOffset();
+
+  for (Instruction *Inst : Path) {
+    if (Inst->getOpcode() == Instruction::Call && isFreeCall(Inst)) {
+      if (mallocWithOffset) {
+        if (!hasMallocFreePathWithOffset(MallocedObjs[mallocInst].get(), Inst)) {
+          Instruction *endInst = RET;
+          MallocedObject *parentObj = MallocedObjs[mallocInst]->getParent();
+          if (parentObj->isDeallocated()) {
+            endInst = parentObj->getFreeCall();
+          }
+          return {MallocedObjs[mallocInst]->getMallocCall(), endInst};
+        } else {
+          errs() << "m: " << *(MallocedObjs[mallocInst]->getMallocCall()) << " | f: "
+                 << *(MallocedObjs[mallocInst]->getFreeCall());
+        }
+
+      } else {
+        if (!hasMallocFreePath(MallocedObjs[mallocInst].get(), Inst)) {
+          return {MallocedObjs[mallocInst]->getMallocCall(), RET};
+        } else {
+          errs() << "m: " << *(MallocedObjs[mallocInst]->getMallocCall()) << " | f: "
+                 << *(MallocedObjs[mallocInst]->getFreeCall());
+        }
+      }
+    }
+  }
+
+  return {};
+}
+
+std::pair<Instruction *, Instruction *> Checker::MemoryLeakChecker() {
   if (MallocedObjs.empty()) {
     return {};
   }
+  std::vector<std::vector<Instruction *>> allPaths;
   for (auto &ObjEntry : MallocedObjs) {
-    findAllPathsFromInstToRet(ObjEntry.second->getMallocCall());
+    std::unordered_set<Instruction *> visitedInsts;
+    std::vector<Instruction *> path;
+    collectPaths(visitedInsts, allPaths, path, ObjEntry.second->getMallocCall(), RET);
   }
-
-  for (auto &ObjEntry : MallocedObjs) {
-    errs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
-    errs() << "Base: " << *(ObjEntry.second->getBaseInst()) << "\n";
-    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " <<  ObjEntry.second->isDeallocated() << "\n";
-    if (ObjEntry.second->isMallocedWithOffset()) {
-      hasMallocFreePathWithOffset(ObjEntry.second.get());
-    } else {
-      hasMallocFreePath(ObjEntry.second.get());
+  errs() << "NUM of PATHs" << allPaths.size() << "\n";
+  for (const auto &path : allPaths) {
+    for (auto &inst : path) {
+      errs() << *inst << "\n\t|\n";
     }
-    errs() << "after work\n";
-    errs() << "Base: " << *(ObjEntry.second->getBaseInst()) << "\n";
-    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " << *(ObjEntry.second->getFreeCall());
-    errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+    errs() << "\n";
   }
 
+  for (auto &path : allPaths) {
+    if (!hasCorrespondingFree(path)) {
+      return {path[0], RET};
+    }
+  }
+//  return {};
+//  for (auto &ObjEntry : MallocedObjs) {
+//    errs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+//    errs() << "Base: " << *(ObjEntry.second->getBaseInst()) << "\n";
+//    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " << ObjEntry.second->isDeallocated() << "\n";
+//    if (ObjEntry.second->isMallocedWithOffset()) {
+//      hasMallocFreePathWithOffset(ObjEntry.second.get());
+//    } else {
+//      hasMallocFreePath(ObjEntry.second.get());
+//    }
+//    errs() << "after work\n";
+//    errs() << "Base: " << *(ObjEntry.second->getBaseInst()) << "\n";
+//    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " << *(ObjEntry.second->getFreeCall());
+//    errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+//  }
+  return {};
 //  for (auto& InfoPtr : MemAllocInfos) {
 //    MemAllocationInfo *Info = InfoPtr.get();
 //    if (Info->isStructMalloc()) {
@@ -283,7 +583,6 @@ InstructionPairPtr::Ptr Checker::MemoryLeakChecker() {
 //      InfoPtr = std::make_shared<MemAllocationInfo>(hasMallocFreePath(Info));
 //    }
 //  }
-  return {};
 }
 //    hasMallocFreePathForStructField(callInst);
 //    hasMallocFreePathForStruct(callInst);
@@ -307,10 +606,6 @@ bool Checker::isMallocCall(Instruction *Inst) {
   return false;
 }
 
-bool Checker::buildBackwardDependencyPath(Instruction *from, Instruction *to) {
-  return DFS(CheckerMaps::BackwardDependencyMap, from, [to](Instruction *inst) { return inst == to; });
-}
-
 //MemAllocationInfo *Checker::hasMallocFreePathForStruct(MemAllocationInfo *Info) {
 //  Instruction *mallocInst = Info->getMallocInst();
 //  DFS(CheckerMaps::ForwardDependencyMap, mallocInst, [Info, this](Instruction *curr) {
@@ -325,54 +620,19 @@ bool Checker::buildBackwardDependencyPath(Instruction *from, Instruction *to) {
 //  return {};
 //}
 
-bool Checker::hasMallocFreePathWithOffset(MallocedObject *Obj) {
-  auto getOffset = [](GetElementPtrInst *gep) {
-    Module *M = gep->getModule();
-    APInt accumulateOffset;
-    if (gep->accumulateConstantOffset(M->getDataLayout(), accumulateOffset)) {
-      return accumulateOffset.getZExtValue();
-    }
-    return SIZE_MAX;
-  };
-
-  bool reachedAlloca = false;
-  bool reachedGEP = false;
-
-  Instruction *startInst = Obj->getBaseInst();
-
-  return DFS(CheckerMaps::ForwardDependencyMap,
-             startInst,
-             [Obj, &reachedAlloca, &reachedGEP, &getOffset, this](Instruction *curr) {
-               if (curr->getOpcode() == Instruction::Alloca) {
-                 reachedAlloca = true;
-               }
-               if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
-                 auto *gep = dyn_cast<GetElementPtrInst>(curr);
-                 if (Obj->getOffset() == getOffset(gep)) {
-                   reachedGEP = true;
-                 }
-               }
-               if (reachedAlloca && reachedGEP && isFreeCall(curr)) {
-                 Obj->setFreeCall(curr);
-                 return true;
-               }
-               return false;
-             });
-}
-
-bool Checker::hasMallocFreePath(MallocedObject *Obj) {
-  Instruction* mallocInst = Obj->getMallocCall();
-  return DFS(CheckerMaps::ForwardDependencyMap, mallocInst, [Obj, this](Instruction *curr) {
-    if (curr->getOpcode() == Instruction::GetElementPtr) {
-
-    }
-    if (isFreeCall(curr)) {
-      Obj->setFreeCall(curr);
-      return true;
-    }
-    return false;
-  });
-}
+//bool Checker::hasMallocFreePath(MallocedObject *Obj) {
+//  Instruction *mallocInst = Obj->getMallocCall();
+//  return DFS(CheckerMaps::ForwardDependencyMap, mallocInst, [Obj, this](Instruction *curr) {
+//    if (curr->getOpcode() == Instruction::GetElementPtr) {
+//
+//    }
+//    if (isFreeCall(curr)) {
+//      Obj->setFreeCall(curr);
+//      return true;
+//    }
+//    return false;
+//  });
+//}
 
 bool Checker::isFreeCall(Instruction *Inst) {
   if (auto *callInst = dyn_cast<CallInst>(Inst)) {
@@ -384,7 +644,8 @@ bool Checker::isFreeCall(Instruction *Inst) {
 
 bool Checker::DFS(CheckerMaps MapID,
                   Instruction *startInst,
-                  const std::function<bool(Instruction *)> &terminationCondition) {
+                  const std::function<bool(Instruction *)> &terminationCondition,
+                  const std::function<bool(Instruction *)> &continueCondition) {
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *Map = nullptr;
   switch (MapID) {
   case CheckerMaps::ForwardDependencyMap:Map = &ForwardDependencyMap;
@@ -410,6 +671,10 @@ bool Checker::DFS(CheckerMaps MapID,
     }
 
     visitedNodes.insert(currInst);
+
+    if (continueCondition && continueCondition(currInst)) {
+      continue;
+    }
 
     for (Instruction *nextInst : Map->operator[](currInst)) {
       if (visitedNodes.find(nextInst) == visitedNodes.end()) {
@@ -443,7 +708,7 @@ bool Checker::isUseAfterFree(Instruction *Inst) {
   return UseAfterFree;
 }
 
-InstructionPairPtr::Ptr Checker::UseAfterFreeChecker() {
+std::pair<Instruction *, Instruction *> Checker::UseAfterFreeChecker() {
 //  Instruction *useAfterFreeInst = nullptr;
 //
 //  for (auto &pair : MallocFreePairs) {
@@ -514,7 +779,7 @@ bool Checker::isScanfCall(Instruction *Inst) {
   return false;
 }
 
-InstructionPairPtr::Ptr Checker::ScanfValidation() {
+std::pair<Instruction *, Instruction *> Checker::ScanfValidation() {
   if (callInstructions.empty() ||
       callInstructions.find("scanf") == callInstructions.end()) {
     return {};
@@ -544,17 +809,17 @@ InstructionPairPtr::Ptr Checker::ScanfValidation() {
     if (auto *formatStringGV = dyn_cast<GlobalVariable>(formatStringAgr->stripPointerCasts())) {
       unsigned int formatStringSize = getFormatStringSize(formatStringGV);
       if (!formatStringSize) {
-        return InstructionPairPtr::makePair(basePointerArray, cInst);
+        return {basePointerArray, cInst};
       }
       if (formatStringSize >= getArraySize(basePointerArray)) {
-        return InstructionPairPtr::makePair(basePointerArray, cInst);
+        return {basePointerArray, cInst};
       }
     }
   }
   return {};
 }
 
-InstructionPairPtr::Ptr Checker::OutOfBoundsAccessChecker() {
+std::pair<Instruction *, Instruction *> Checker::OutOfBoundsAccessChecker() {
   if (callInstructions.empty() ||
       callInstructions.find("malloc") == callInstructions.end()) {
     return {};
@@ -565,13 +830,13 @@ InstructionPairPtr::Ptr Checker::OutOfBoundsAccessChecker() {
   return {};
 }
 
-InstructionPairPtr::Ptr Checker::BuffOverflowChecker() {
-  InstructionPairPtr::Ptr scanfBOF = ScanfValidation();
-  if (scanfBOF) {
+std::pair<Instruction *, Instruction *> Checker::BuffOverflowChecker() {
+  std::pair<Instruction *, Instruction *> scanfBOF = ScanfValidation();
+  if (scanfBOF.first && scanfBOF.second) {
     return scanfBOF;
   }
-  InstructionPairPtr::Ptr outOfBoundAcc = OutOfBoundsAccessChecker();
-  if (outOfBoundAcc) {
+  std::pair<Instruction *, Instruction *> outOfBoundAcc = OutOfBoundsAccessChecker();
+  if (outOfBoundAcc.first && outOfBoundAcc.second) {
     return outOfBoundAcc;
   }
   return {};
