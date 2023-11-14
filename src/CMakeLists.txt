@@ -1,12 +1,13 @@
-set(AnalyzerSources Sarif.cpp
-        SimplePass.cpp
-        ../include/SimplePass.h
-        Checker.cpp
-        ../include/Checker.h)
+set(AnalyzerSources
+    Sarif.cpp
+    SimplePass.cpp
+    Checker.cpp
+    FuncAnalyzer.cpp)
 
 add_library(Analyzer SHARED ${AnalyzerSources}
         ../include/SimplePass.h
-        ../include/Checker.h)
+        ../include/Checker.h
+        ../include/FuncAnalyzer.h)
 
 find_package(LLVM 12 REQUIRED)
 

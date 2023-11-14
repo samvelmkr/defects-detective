@@ -8,14 +8,8 @@
 
 namespace llvm {
 
-
 Checker::Checker(Module *M) {
-  Main = M->getFunction("main");
-
-  // TODO: Better way: build call graph from function 'main'
-  for (auto& Func : M->getFunctionList()) {
-    FuncAnalysis[&Func] = FuncAnalyzer(&Func);
-  }
+  
 }
 
 void Checker::addEdge(std::unordered_map<Instruction *, std::unordered_set<Instruction *>> &Map,
@@ -351,53 +345,53 @@ void Checker::collectPaths(std::unordered_set<Instruction *> &visitedInsts,
   visitedInsts.erase(from);
 }
 
-//void find_paths2(std::vector<std::vector<int>> &paths,
-//                 std::vector<int> &path,
-//                 std::vector<std::vector<int>> &answer,
-//                 int from,
-//                 int to) {
-//
-//  std::stack<int> s_path;
-//  std::stack<int> s_index;
-//  s_path.push(from);
-//  s_index.push(0);
-//
-//  while (!s_path.empty()) {
-//    int vertex = s_path.top();
-//    int ind = s_index.top();
-//    path.push_back(vertex);
-//
-//    if (vertex == to) {
-//      paths.push_back(path);
-//    }
-//
-//    if (ind < answer[vertex].size() &&
-//        answer[vertex][ind] != -1) {
-//
-//      int tmp = answer[vertex][ind];
-//      s_path.push(tmp);
-//      s_index.push(0);
-//    } else {
-//      s_path.pop();
-//      s_index.pop();
-//      path.pop_back();
-//      if (s_path.empty()) {
-//        break;
-//      }
-//
-//      vertex = s_path.top();
-//      ind = s_index.top();
-//      ++ind;
-//
-//      s_path.pop();
-//      s_index.pop();
-//      path.pop_back();
-//
-//      s_path.push(vertex);
-//      s_index.push(ind);
-//    }
-//  }
-//}
+void find_paths2(std::vector<std::vector<int>> &paths,
+                 std::vector<int> &path,
+                 std::vector<std::vector<int>> &answer,
+                 int from,
+                 int to) {
+
+  std::stack<int> s_path;
+  std::stack<int> s_index;
+  s_path.push(from);
+  s_index.push(0);
+
+  while (!s_path.empty()) {
+    int vertex = s_path.top();
+    int ind = s_index.top();
+    path.push_back(vertex);
+
+    if (vertex == to) {
+      paths.push_back(path);
+    }
+
+    if (ind < answer[vertex].size() &&
+        answer[vertex][ind] != -1) {
+
+      int tmp = answer[vertex][ind];
+      s_path.push(tmp);
+      s_index.push(0);
+    } else {
+      s_path.pop();
+      s_index.pop();
+      path.pop_back();
+      if (s_path.empty()) {
+        break;
+      }
+
+      vertex = s_path.top();
+      ind = s_index.top();
+      ++ind;
+
+      s_path.pop();
+      s_index.pop();
+      path.pop_back();
+
+      s_path.push(vertex);
+      s_index.push(ind);
+    }
+  }
+}
 
 // Function to find all paths from Instruction A to Instruction B using DFS.
 //std::vector<std::vector<Instruction*>> Checker::findAllPaths(Instruction* start, Instruction* end) {
@@ -520,7 +514,7 @@ bool Checker::hasMallocFreePathWithOffset(MallocedObject *Obj, Instruction *free
 
 std::pair<Instruction *, Instruction *> Checker::checkFreeExistence(std::vector<Instruction *> &Path) {
   Instruction *mallocInst = Path[0];
-//  errs() << "Malloc: " << *mallocInst << " | base: " << *(MallocedObjs[mallocInst]->getBaseInst()) << "\n";
+  errs() << "Malloc: " << *mallocInst << " | base: " << *(MallocedObjs[mallocInst]->getBaseInst()) << "\n";
   bool mallocWithOffset = MallocedObjs[mallocInst]->isMallocedWithOffset();
 
   bool foundMallocFreePath = false;
@@ -541,7 +535,7 @@ std::pair<Instruction *, Instruction *> Checker::checkFreeExistence(std::vector<
     }
   }
 
-//  errs() << "\tfound: " << foundMallocFreePath << "\n";
+  errs() << "\tfound: " << foundMallocFreePath << "\n";
 
   if (!foundMallocFreePath) {
     Instruction *endInst = RET;
@@ -551,7 +545,7 @@ std::pair<Instruction *, Instruction *> Checker::checkFreeExistence(std::vector<
         endInst = parentObj->getFreeCall();
       }
     }
-//    errs() << "MALLOC trace: " << *mallocInst << " | " << *endInst << "\n";
+    errs() << "MALLOC trace: " << *mallocInst << " | " << *endInst << "\n";
     return {mallocInst, endInst};
   }
 
@@ -570,13 +564,13 @@ std::pair<Instruction *, Instruction *> Checker::MemoryLeakChecker() {
     std::vector<Instruction *> path;
     collectPaths(visitedInsts, allPaths, path, callInst, RET);
   }
-//  errs() << "NUM of PATHs" << allPaths.size() << "\n";
-//  for (const auto &path : allPaths) {
-//    for (auto &inst : path) {
-//      errs() << *inst << "\n\t|\n";
-//    }
-//    errs() << "\n";
-//  }
+  errs() << "NUM of PATHs" << allPaths.size() << "\n";
+  for (const auto &path : allPaths) {
+    for (auto &inst : path) {
+      errs() << *inst << "\n\t|\n";
+    }
+    errs() << "\n";
+  }
 
   for (auto &path : allPaths) {
     std::pair<Instruction *, Instruction *> MemLeakTrace = checkFreeExistence(path);
@@ -739,29 +733,28 @@ bool Checker::isUseAfterFree(Instruction *Inst) {
 }
 
 std::pair<Instruction *, Instruction *> Checker::UseAfterFreeChecker() {
-  Instruction *useAfterFreeInst = nullptr;
-
-  for (auto &ObjPair : MallocedObjs) {
-    Instruction *mallocInst = ObjPair.second->getMallocCall();
-    Instruction *freeInst = ObjPair.second->getFreeCall();
-    bool foundUsageAfterFree =
-        DFS(CheckerMaps::ForwardFlowMap, freeInst, [mallocInst, freeInst, &useAfterFreeInst, this](Instruction *inst) {
-          if (inst != freeInst && hasPath(CheckerMaps::BackwardDependencyMap, inst, mallocInst)) {
-            useAfterFreeInst = inst;
-            return true;
-          }
-          return false;
-        });
-
-    if (!foundUsageAfterFree) {
-      continue;
-    }
-
-    if (useAfterFreeInst && isUseAfterFree(useAfterFreeInst)) {
-      errs() << freeInst << "|" << useAfterFreeInst << "\n";
-      return {freeInst, useAfterFreeInst};
-    }
-  }
+//  Instruction *useAfterFreeInst = nullptr;
+//
+//  for (auto &pair : MallocFreePairs) {
+//    Instruction *mallocInst = pair.get()->first;
+//    Instruction *freeInst = pair.get()->second;
+//    bool foundUsageAfterFree =
+//        DFS(CheckerMaps::ForwardFlowMap, freeInst, [mallocInst, freeInst, &useAfterFreeInst, this](Instruction *inst) {
+//          if (inst != freeInst && buildBackwardDependencyPath(inst, mallocInst)) {
+//            useAfterFreeInst = inst;
+//            return true;
+//          }
+//          return false;
+//        });
+//
+//    if (!foundUsageAfterFree) {
+//      continue;
+//    }
+//
+//    if (useAfterFreeInst && isUseAfterFree(useAfterFreeInst)) {
+//      return InstructionPairPtr::makePair(freeInst, useAfterFreeInst);
+//    }
+//  }
   return {};
 }
 
@@ -825,12 +818,11 @@ std::pair<Instruction *, Instruction *> Checker::ScanfValidation() {
     Module *M = bufGEP->getModule();
     APInt accumulateOffset;
 
-    bufGEP->accumulateConstantOffset(M->getDataLayout(), accumulateOffset);
-//    if (bufGEP->accumulateConstantOffset(M->getDataLayout(), accumulateOffset)) {
-//      errs() << "offset: " << accumulateOffset << "\n";
-//    } else {
-//      errs() << "chkpav\n";
-//    }
+    if (bufGEP->accumulateConstantOffset(M->getDataLayout(), accumulateOffset)) {
+      errs() << "offset: " << accumulateOffset << "\n";
+    } else {
+      errs() << "chkpav\n";
+    }
 
     Value *basePointer = bufGEP->getPointerOperand();
     auto *basePointerArray = dyn_cast<AllocaInst>(basePointer);

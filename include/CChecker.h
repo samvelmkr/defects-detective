@@ -1,9 +1,12 @@
-#ifndef ANALYZER_SRC_CHECKER_H
-#define ANALYZER_SRC_CHECKER_H
+#ifndef ANALYZER_H
+#define ANALYZER_H
 
 #include "llvm/IR/Module.h"
-#include "FuncAnalyzer.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 
+#include <unordered_set>
+#include <utility>
 
 namespace llvm {
 
@@ -60,10 +63,7 @@ enum CheckerMaps {
 
 class Checker {
 private:
-  Function* Main;
-  std::unordered_map<Function *, FuncAnalyzer> FuncAnalysis;
-
-
+  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> ForwardDependencyMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardDependencyMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> ForwardFlowMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardFlowMap;
@@ -138,4 +138,4 @@ public:
 
 };
 
-#endif //ANALYZER_SRC_CHECKER_H
+#endif //ANALYZER_H
