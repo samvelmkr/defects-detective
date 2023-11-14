@@ -88,12 +88,18 @@ void SimplePass::analyze(Module &M) {
     return;
   }
 
+  Checker analyzer;
   for (auto &Func : M.getFunctionList()) {
-    if (Func.isDeclarationForLinker()) {
-      continue;
-    }
-    Checker analyzer;
-    analyzer.collectDependencies(&Func);
+//    if (Func.isDeclarationForLinker()) {
+//      continue;
+//    }
+    errs() << Func.getName() << "\n";
+  }
+}
+
+
+//    Checker analyzer;
+//    analyzer.collectDependencies(&Func);
 
 //    analyzer.printMap(CheckerMaps::ForwardFlowMap);
 //    errs() << "----------------------------------------\n";
@@ -101,32 +107,34 @@ void SimplePass::analyze(Module &M) {
 //    errs() << "----------------------------------------\n";
 //    analyzer.printMap(CheckerMaps::BackwardDependencyMap);
 //    errs() << "----------------------------------------\n";
-
-    Sarif GenSarif;
-    std::pair<Instruction*, Instruction*> mlLoc = analyzer.MemoryLeakChecker();
-    if (mlLoc.first && mlLoc.second) {
-//      errs() << *mlLoc.first << " | " << *mlLoc.second << "\n";
-      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(mlLoc.first, mlLoc.second);
-      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
-    }
-
-    std::pair<Instruction*, Instruction*> uafLoc = analyzer.UseAfterFreeChecker();
-    if (uafLoc.first && uafLoc.second) {
-//      errs() << *uafLoc.first << " | " << *uafLoc.second << "\n";
-      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(uafLoc.first, uafLoc.second);
-      GenSarif.addResult(BugReport(Trace, "use-after-free", 0));
-    }
-
-    std::pair<Instruction*, Instruction*> bofLoc = analyzer.BuffOverflowChecker();
-    if (bofLoc.first && bofLoc.second) {
-//      errs() << *bofLoc.first << " | " << *bofLoc.second << "\n";
-      SmallVector<std::pair<std::string, unsigned>> Trace = createTraceOfPairInst(bofLoc.first, bofLoc.second);
-      GenSarif.addResult(BugReport(Trace, "buffer-overflow", 2));
-    }
-
-    GenSarif.save();
-  }
-}
+//
+//    Sarif GenSarif;
+//    std::pair<Instruction*, Instruction*> mlLoc = analyzer.MemoryLeakChecker();
+//    if (mlLoc.first && mlLoc.second) {
+//      errs() << "MemLeak" << *mlLoc.first << " | " << *mlLoc.second << "\n";
+//      errs() << "Value " << *(dyn_cast<Value>(mlLoc.second)) << "\n";
+//
+//      auto Trace = createTraceOfPairInst(mlLoc.first, mlLoc.second);
+//      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
+//    }
+//
+//    std::pair<Instruction*, Instruction*> uafLoc = analyzer.UseAfterFreeChecker();
+//    if (uafLoc.first && uafLoc.second) {
+////      errs() << *uafLoc.first << " | " << *uafLoc.second << "\n";
+//      auto Trace = createTraceOfPairInst(uafLoc.first, uafLoc.second);
+//      GenSarif.addResult(BugReport(Trace, "use-after-free", 0));
+//    }
+//
+//    std::pair<Instruction*, Instruction*> bofLoc = analyzer.BuffOverflowChecker();
+//    if (bofLoc.first && bofLoc.second) {
+////      errs() << *bofLoc.first << " | " << *bofLoc.second << "\n";
+//      auto Trace = createTraceOfPairInst(bofLoc.first, bofLoc.second);
+//      GenSarif.addResult(BugReport(Trace, "buffer-overflow", 2));
+//    }
+//
+//    GenSarif.save();
+//  }
+//}
 
 /// Register the pass.
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK llvmGetPassPluginInfo() {

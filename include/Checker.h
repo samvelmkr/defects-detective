@@ -150,7 +150,7 @@ private:
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> ForwardFlowMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> BackwardFlowMap;
 
-  std::unordered_map<std::string, std::unordered_set<Instruction *>> callInstructions;
+  std::unordered_map<std::string, std::vector<Instruction *>> callInstructions;
 
 //  std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructInfos;
 //  std::unordered_map<std::string, std::shared_ptr<StructInfo>> StructFieldInfos;
@@ -172,6 +172,7 @@ public:
   void constructFlow(Function *Func);
 
   void updateDependencies();
+  MallocedObject* findSuitableObj(Instruction* baseInst);
   void collectMallocedObjs();
   std::vector<std::vector<Instruction *>> findAllPaths(Instruction *start, Instruction *end);
 
@@ -194,13 +195,12 @@ public:
   //===--------------------------------------------------------------------===//
   bool hasMallocFreePath(MallocedObject *Obj, Instruction *freeInst);
   bool hasMallocFreePathWithOffset(MallocedObject *Obj, Instruction *freeInst);
-  std::pair<Instruction *, Instruction *> hasCorrespondingFree(std::vector<Instruction *> &path);
+  std::pair<Instruction *, Instruction *> checkFreeExistence(std::vector<Instruction *> &path);
   std::pair<Instruction *, Instruction *> MemoryLeakChecker();
 
   //===--------------------------------------------------------------------===//
   // Use after free checker.
   //===--------------------------------------------------------------------===//
-
   bool isUseAfterFree(Instruction *Inst);
   std::pair<Instruction *, Instruction *> UseAfterFreeChecker();
 

@@ -36,13 +36,13 @@ void Checker::collectDependencies(Function *Func) {
     for (auto &Inst : BB) {
       if (Inst.getOpcode() == Instruction::Call) {
         if (isMallocCall(&Inst)) {
-          callInstructions["malloc"].insert(&Inst);
+          callInstructions["malloc"].push_back(&Inst);
         }
         if (isFreeCall(&Inst)) {
-          callInstructions["free"].insert(&Inst);
+          callInstructions["free"].push_back(&Inst);
         }
         if (isScanfCall(&Inst)) {
-          callInstructions["scanf"].insert(&Inst);
+          callInstructions["scanf"].push_back(&Inst);
         }
       }
 
@@ -115,6 +115,15 @@ void Checker::updateDependencies() {
   }
 }
 
+MallocedObject *Checker::findSuitableObj(Instruction *baseInst) {
+  for (auto &ObjPair : MallocedObjs) {
+    if (ObjPair.second->getBaseInst() == baseInst) {
+      return ObjPair.second.get();
+    }
+  }
+  return nullptr;
+}
+
 void Checker::collectMallocedObjs() {
   if (callInstructions.empty() ||
       callInstructions.find("malloc") == callInstructions.end()) {
@@ -140,8 +149,7 @@ void Checker::collectMallocedObjs() {
 
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
         Instruction *nextInst = *(ForwardDependencyMap[curr].begin());
-        auto
-        Obj->setOffset(MallocedObject(nextInst), accumulateOffset.getZExtValue());
+        Obj->setOffset(findSuitableObj(nextInst), accumulateOffset.getZExtValue());
         MallocedObjs[callInst] = Obj;
         return true;
       }
@@ -441,7 +449,7 @@ bool Checker::hasMallocFreePath(MallocedObject *Obj, Instruction *freeInst) {
   Instruction *startInst = Obj->getBaseInst();
   return DFS(CheckerMaps::ForwardDependencyMap,
              startInst,
-             // Termination condition
+      // Termination condition
              [Obj, freeInst](Instruction *curr) {
                if (curr == freeInst) {
                  Obj->setFreeCall(freeInst);
@@ -449,7 +457,7 @@ bool Checker::hasMallocFreePath(MallocedObject *Obj, Instruction *freeInst) {
                }
                return false;
              },
-             // Continue condition
+      // Continue condition
              [](Instruction *curr) {
                if (curr->getOpcode() == Instruction::GetElementPtr) {
                  return true;
@@ -500,49 +508,57 @@ bool Checker::hasMallocFreePathWithOffset(MallocedObject *Obj, Instruction *free
              });
 }
 
-std::pair<Instruction*, Instruction*> Checker::hasCorrespondingFree(std::vector<Instruction *> &Path) {
+std::pair<Instruction *, Instruction *> Checker::checkFreeExistence(std::vector<Instruction *> &Path) {
   Instruction *mallocInst = Path[0];
-
+  errs() << "Malloc: " << *mallocInst << " | base: " << *(MallocedObjs[mallocInst]->getBaseInst()) << "\n";
   bool mallocWithOffset = MallocedObjs[mallocInst]->isMallocedWithOffset();
+
+  bool foundMallocFreePath = false;
 
   for (Instruction *Inst : Path) {
     if (Inst->getOpcode() == Instruction::Call && isFreeCall(Inst)) {
       if (mallocWithOffset) {
-        if (!hasMallocFreePathWithOffset(MallocedObjs[mallocInst].get(), Inst)) {
-          Instruction *endInst = RET;
-          MallocedObject *parentObj = MallocedObjs[mallocInst]->getParent();
-          if (parentObj->isDeallocated()) {
-            endInst = parentObj->getFreeCall();
-          }
-          return {MallocedObjs[mallocInst]->getMallocCall(), endInst};
-        } else {
-          errs() << "m: " << *(MallocedObjs[mallocInst]->getMallocCall()) << " | f: "
-                 << *(MallocedObjs[mallocInst]->getFreeCall());
+        if (hasMallocFreePathWithOffset(MallocedObjs[mallocInst].get(), Inst)) {
+          foundMallocFreePath = true;
+          break;
         }
-
       } else {
-        if (!hasMallocFreePath(MallocedObjs[mallocInst].get(), Inst)) {
-          return {MallocedObjs[mallocInst]->getMallocCall(), RET};
-        } else {
-          errs() << "m: " << *(MallocedObjs[mallocInst]->getMallocCall()) << " | f: "
-                 << *(MallocedObjs[mallocInst]->getFreeCall());
+        if (hasMallocFreePath(MallocedObjs[mallocInst].get(), Inst)) {
+          foundMallocFreePath = true;
+          break;
         }
       }
     }
+  }
+
+  errs() << "\tfound: " << foundMallocFreePath << "\n";
+
+  if (!foundMallocFreePath) {
+    Instruction *endInst = RET;
+    if (mallocWithOffset) {
+      MallocedObject *parentObj = MallocedObjs[mallocInst]->getParent();
+      if (parentObj->isDeallocated()) {
+        endInst = parentObj->getFreeCall();
+      }
+    }
+    errs() << "MALLOC trace: " << *mallocInst << " | " << *endInst << "\n";
+    return {mallocInst, endInst};
   }
 
   return {};
 }
 
 std::pair<Instruction *, Instruction *> Checker::MemoryLeakChecker() {
-  if (MallocedObjs.empty()) {
+  if (callInstructions.empty() ||
+      callInstructions.find("malloc") == callInstructions.end()) {
     return {};
   }
+
   std::vector<std::vector<Instruction *>> allPaths;
-  for (auto &ObjEntry : MallocedObjs) {
+  for (Instruction *callInst : callInstructions.at("malloc")) {
     std::unordered_set<Instruction *> visitedInsts;
     std::vector<Instruction *> path;
-    collectPaths(visitedInsts, allPaths, path, ObjEntry.second->getMallocCall(), RET);
+    collectPaths(visitedInsts, allPaths, path, callInst, RET);
   }
   errs() << "NUM of PATHs" << allPaths.size() << "\n";
   for (const auto &path : allPaths) {
@@ -553,10 +569,15 @@ std::pair<Instruction *, Instruction *> Checker::MemoryLeakChecker() {
   }
 
   for (auto &path : allPaths) {
-    if (!hasCorrespondingFree(path)) {
-      return {path[0], RET};
+    std::pair<Instruction *, Instruction *> MemLeakTrace = checkFreeExistence(path);
+    if (!MemLeakTrace.first || !MemLeakTrace.second) {
+      continue;
     }
+    return MemLeakTrace;
   }
+  return {};
+}
+
 //  return {};
 //  for (auto &ObjEntry : MallocedObjs) {
 //    errs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
@@ -572,7 +593,6 @@ std::pair<Instruction *, Instruction *> Checker::MemoryLeakChecker() {
 //    errs() << "m: " << *(ObjEntry.second->getMallocCall()) << " | f: " << *(ObjEntry.second->getFreeCall());
 //    errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 //  }
-  return {};
 //  for (auto& InfoPtr : MemAllocInfos) {
 //    MemAllocationInfo *Info = InfoPtr.get();
 //    if (Info->isStructMalloc()) {
@@ -583,7 +603,7 @@ std::pair<Instruction *, Instruction *> Checker::MemoryLeakChecker() {
 //      InfoPtr = std::make_shared<MemAllocationInfo>(hasMallocFreePath(Info));
 //    }
 //  }
-}
+//}
 //    hasMallocFreePathForStructField(callInst);
 //    hasMallocFreePathForStruct(callInst);
 //
