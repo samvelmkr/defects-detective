@@ -88,48 +88,12 @@ void SimplePass::analyze(Module &M) {
     return;
   }
 
-  for (auto &Func : M.getFunctionList()) {
-    if (Func.isDeclarationForLinker()) {
-      continue;
-    }
-    Checker analyzer;
-    analyzer.collectDependencies(&Func);
+  auto checker = std::make_shared<Checker>(M);
+  checker->Check();
 
-//    analyzer.printMap(CheckerMaps::ForwardFlowMap);
-//    errs() << "----------------------------------------\n";
-//    analyzer.printMap(CheckerMaps::ForwardDependencyMap);
-//    errs() << "----------------------------------------\n";
-//    analyzer.printMap(CheckerMaps::BackwardDependencyMap);
-//    errs() << "----------------------------------------\n";
+  Sarif GenSarif;
+  GenSarif.save();
 
-    Sarif GenSarif;
-    std::pair<Instruction*, Instruction*> mlLoc = analyzer.MemoryLeakChecker();
-    if (mlLoc.first && mlLoc.second) {
-//      errs() << "MemLeak" << *mlLoc.first << " | " << *mlLoc.second << "\n";
-      auto Trace = createTraceOfPairInst(mlLoc.first, mlLoc.second);
-      GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
-      GenSarif.save();
-      break;
-    }
-
-    std::pair<Instruction*, Instruction*> uafLoc = analyzer.UseAfterFreeChecker();
-    if (uafLoc.first && uafLoc.second) {
-      errs() << *uafLoc.first << " | " << *uafLoc.second << "\n";
-      auto Trace = createTraceOfPairInst(uafLoc.first, uafLoc.second);
-      GenSarif.addResult(BugReport(Trace, "use-after-free", 0));
-      GenSarif.save();
-      break;
-    }
-
-    std::pair<Instruction*, Instruction*> bofLoc = analyzer.BuffOverflowChecker();
-    if (bofLoc.first && bofLoc.second) {
-//      errs() << *bofLoc.first << " | " << *bofLoc.second << "\n";
-      auto Trace = createTraceOfPairInst(bofLoc.first, bofLoc.second);
-      GenSarif.addResult(BugReport(Trace, "buffer-overflow", 2));
-      GenSarif.save();
-      break;
-    }
-  }
 }
 
 /// Register the pass.

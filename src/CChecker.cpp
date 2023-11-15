@@ -81,6 +81,7 @@ void Checker::collectDependencies(Function *Func) {
   }
 
   const BasicBlock &lastBB = *(--(Func->end()));
+  const BasicBlock &lastBB = *(--(Func->end()));
   if (!lastBB.empty()) {
     RET = const_cast<Instruction *>(&*(--(lastBB.end())));
   }
