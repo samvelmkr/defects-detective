@@ -31,6 +31,8 @@ public:
   bool isDeallocated() const;
 };
 
+bool IsCallWithName(Instruction *inst, const std::string &name);
+
 struct CallInstruction {
   static const std::string Malloc;
   static const std::string Free;
@@ -55,10 +57,6 @@ private:
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> backwardDependencyMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> forwardFlowMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> backwardFlowMap;
-
-  std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> MallocedObjs;
-
-  static bool IsCallWithName(Instruction *inst, const std::string &name);
 
   void CollectCalls(Instruction *callInst);
 
@@ -96,12 +94,14 @@ public:
 
   void printMap(AnalyzerMap mapID);
   std::vector<Instruction *> getCalls(const std::string &funcName);
-  Instruction* getRet() const;
+  Instruction *getRet() const;
 
-  void CollectPaths(Instruction* from, Instruction* to,
-                    std::vector<std::vector<Instruction *>>& allPaths);
+  void CollectPaths(Instruction *from, Instruction *to,
+                    std::vector<std::vector<Instruction *>> &allPaths);
 
   bool hasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
+
+  std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> mallocedObjs;
 };
 
 } // namespace llvm

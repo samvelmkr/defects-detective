@@ -7,6 +7,14 @@ const std::string CallInstruction::Malloc = "malloc";
 const std::string CallInstruction::Free = "free";
 const std::string CallInstruction::Scanf = "__isoc99_scanf";
 
+bool IsCallWithName(Instruction *inst, const std::string &name) {
+  if (auto *callInst = dyn_cast<CallInst>(inst)) {
+    Function *calledFunc = callInst->getCalledFunction();
+    return calledFunc->getName().str() == name;
+  }
+  return false;
+}
+
 MallocedObject::MallocedObject(Instruction *inst) {
   base = inst;
 }
@@ -52,14 +60,6 @@ Instruction *MallocedObject::getBaseInst() {
 
 bool MallocedObject::isDeallocated() const {
   return mallocFree.second != nullptr;
-}
-
-bool FuncAnalyzer::IsCallWithName(Instruction *inst, const std::string &name) {
-  if (auto *callInst = dyn_cast<CallInst>(inst)) {
-    Function *calledFunc = callInst->getCalledFunction();
-    return calledFunc->getName().str() == name;
-  }
-  return false;
 }
 
 void FuncAnalyzer::CollectCalls(Instruction *callInst) {
@@ -173,7 +173,7 @@ void FuncAnalyzer::CollectMallocedObjs() {
       if (current->getOpcode() == Instruction::Alloca) {
         auto obj = std::make_shared<MallocedObject>(current);
         obj->setMallocCall(mallocInst);
-        MallocedObjs[mallocInst] = obj;
+        mallocedObjs[mallocInst] = obj;
         return true;
       }
       if (current->getOpcode() == Instruction::GetElementPtr) {
@@ -185,7 +185,7 @@ void FuncAnalyzer::CollectMallocedObjs() {
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
         Instruction *next = *(forwardDependencyMap[current].begin());
         obj->setOffset(findSuitableObj(next), offset);
-        MallocedObjs[mallocInst] = obj;
+        mallocedObjs[mallocInst] = obj;
         return true;
       }
       return false;
@@ -262,7 +262,7 @@ FuncAnalyzer::FuncAnalyzer(llvm::Function *func) {
 }
 
 MallocedObject *FuncAnalyzer::findSuitableObj(Instruction *base) {
-  for (auto &objPair : MallocedObjs) {
+  for (auto &objPair : mallocedObjs) {
     if (objPair.second->getBaseInst() == base) {
       return objPair.second.get();
     }

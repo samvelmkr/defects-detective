@@ -171,6 +171,26 @@ GenSarif.save();
 break;
 }
 
+
+errs() << "CALL GRAPH\n";
+for (std::pair<const Function *const, std::unique_ptr<CallGraphNode>> &Pair : *callGraph) {
+const Function *F = Pair.first;
+if (!F) {
+errs() << "FUNC: chka\n";
+}
+else {
+errs() << "FUNC: " << F->getName().str() << "\n";
+if (F->isDeclarationForLinker()) {
+continue;
+}
+}
+
+CallGraphNode *node = Pair.second.get();
+for (auto iter = node->begin(); iter != node->end(); ++iter) {
+errs() << "   CALLS: " << iter->second->getFunction()->getName() << "\n";
+}
+}
+
 };
 
 #endif //ANALYZER_H

@@ -88,12 +88,15 @@ void SimplePass::analyze(Module &M) {
     return;
   }
 
-  auto checker = std::make_shared<Checker>(M);
-  checker->Check();
-
   Sarif GenSarif;
-  GenSarif.save();
 
+  auto checker = std::make_shared<Checker>(M);
+  std::pair<Instruction*, Instruction*> mlLoc = checker->MLCheck();
+  if (mlLoc.first && mlLoc.second) {
+    auto Trace = createTraceOfPairInst(mlLoc.first, mlLoc.second);
+    GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
+  }
+  GenSarif.save();
 }
 
 /// Register the pass.

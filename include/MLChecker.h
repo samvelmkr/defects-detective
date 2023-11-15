@@ -14,7 +14,7 @@ class MLChecker {
 public:
   MLChecker(Function* func, FuncAnalyzer* analyzer);
   bool hasMallocFreePath(MallocedObject* obj, Instruction* free);
-  bool hasMallocFreePathWithOffset(MallocedObject *Obj, Instruction *freeInst);
+  bool hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free);
   std::pair<Instruction *, Instruction *> checkFreeExistence(std::vector<Instruction *> &path);
   std::pair<Instruction *, Instruction *> Check();
 };

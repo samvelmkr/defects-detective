@@ -2,19 +2,32 @@
 #define ANALYZER_SRC_CHECKER_H
 
 #include "MLChecker.h"
+#include "llvm/Analysis/CallGraph.h"
+#include <queue>
 
 namespace llvm {
 
+class BugType{
+  static const std::pair<std::string, int> MemoryLeak;
+  static const std::pair<std::string, int> UseAfterFree;
+  static const std::pair<std::string, int> BufferOverFlow;
+};
+
 class Checker {
 private:
-  Function* main;
+  Module *module;
+  Function *mainFunc;
+  std::unique_ptr<CallGraph> callGraph;
+  std::queue<Function *> funcQueue;
+
   std::unordered_map<Function *, FuncAnalyzer> funcAnalysis;
 
-  std::shared_ptr<MLChecker> mlChecker;
 public:
-  Checker(Module& m);
-  void Check();
+  Checker(Module &m);
 
+  std::pair<Instruction *, Instruction *> MLCheck();
+  std::pair<Instruction *, Instruction *> UAFCheck();
+  std::pair<Instruction *, Instruction *> BOFCheck();
 };
 
 } // namespace llvm
