@@ -15,7 +15,7 @@ private:
   Instruction *base = {};
   size_t offset = SIZE_MAX;
   MallocedObject *main = {};
-  std::pair<Instruction *, Instruction *> mallocFree = {nullptr, nullptr};
+  std::pair<Instruction *, std::vector<Instruction *>> mallocFree = {};
 public:
   MallocedObject(Instruction *inst);
   MallocedObject(MallocedObject *obj);
@@ -23,10 +23,10 @@ public:
   size_t getOffset() const;
   bool isMallocedWithOffset() const;
   void setMallocCall(Instruction *malloc);
-  void setFreeCall(Instruction *free);
+  void addFreeCall(Instruction *free);
   MallocedObject *getMainObj() const;
   Instruction *getMallocCall() const;
-  Instruction *getFreeCall() const;
+  std::vector<Instruction *> getFreeCalls() const;
   Instruction *getBaseInst();
   bool isDeallocated() const;
 };

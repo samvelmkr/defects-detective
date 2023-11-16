@@ -2,15 +2,36 @@
 #define ANALYZER_SRC_CHECKER_H
 
 #include "MLChecker.h"
+#include "UAFChecker.h"
+#include "BOFChecker.h"
 #include "llvm/Analysis/CallGraph.h"
 #include <queue>
 
 namespace llvm {
 
-class BugType{
+struct BugType {
   static const std::pair<std::string, int> MemoryLeak;
   static const std::pair<std::string, int> UseAfterFree;
   static const std::pair<std::string, int> BufferOverFlow;
+};
+
+class BugTrace {
+private:
+  std::pair<Instruction *, Instruction *> trace = {};
+  std::pair<std::string, int> type = {};
+public:
+  BugTrace() = default;
+  BugTrace(const std::pair<Instruction *, Instruction *> &bugPair,
+           const std::pair<std::string, int> &bugType) {
+    trace = bugPair;
+    type = bugType;
+  }
+  std::pair<Instruction *, Instruction *> getTrace() {
+    return trace;
+  }
+  std::pair<std::string, int> getType() {
+    return type;
+  }
 };
 
 class Checker {
@@ -22,12 +43,13 @@ private:
 
   std::unordered_map<Function *, FuncAnalyzer> funcAnalysis;
 
+  std::unique_ptr<BugTrace> bug;
 public:
   Checker(Module &m);
 
-  std::pair<Instruction *, Instruction *> MLCheck();
-  std::pair<Instruction *, Instruction *> UAFCheck();
-  std::pair<Instruction *, Instruction *> BOFCheck();
+  std::shared_ptr<BugTrace> MLCheck();
+  std::shared_ptr<BugTrace> UAFCheck();
+  std::shared_ptr<BugTrace> BOFCheck();
 };
 
 } // namespace llvm

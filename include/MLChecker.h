@@ -11,6 +11,11 @@ class MLChecker {
 
   std::vector<std::vector<Instruction*>> allMallocRetPaths = {};
 
+  static void ProcessTermInstOfPath(std::vector<Instruction *> &path);
+
+  // Malloced instruction value is null.
+  bool IsNullMallocedInst(std::vector<Instruction *> &path, Instruction* icmp);
+  Instruction* hasCmpWithNull(Instruction* icmp);
 public:
   MLChecker(Function* func, FuncAnalyzer* analyzer);
   bool hasMallocFreePath(MallocedObject* obj, Instruction* free);

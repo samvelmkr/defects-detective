@@ -38,8 +38,8 @@ void MallocedObject::setMallocCall(Instruction *malloc) {
   mallocFree.first = malloc;
 }
 
-void MallocedObject::setFreeCall(Instruction *free) {
-  mallocFree.second = free;
+void MallocedObject::addFreeCall(Instruction *free) {
+  mallocFree.second.push_back(free);
 }
 
 MallocedObject *MallocedObject::getMainObj() const {
@@ -50,7 +50,7 @@ Instruction *MallocedObject::getMallocCall() const {
   return mallocFree.first;
 }
 
-Instruction *MallocedObject::getFreeCall() const {
+std::vector<Instruction *> MallocedObject::getFreeCalls() const {
   return mallocFree.second;
 }
 
@@ -59,7 +59,7 @@ Instruction *MallocedObject::getBaseInst() {
 }
 
 bool MallocedObject::isDeallocated() const {
-  return mallocFree.second != nullptr;
+  return !mallocFree.second.empty();
 }
 
 void FuncAnalyzer::CollectCalls(Instruction *callInst) {

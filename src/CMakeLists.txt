@@ -3,13 +3,17 @@ set(AnalyzerSources
     SimplePass.cpp
     Checker.cpp
     FuncAnalyzer.cpp
-    MLChecker.cpp)
+    MLChecker.cpp
+    UAFChecker.cpp
+        BOFChecker.cpp
+        ../include/BOFChecker.h)
 
 add_library(Analyzer SHARED ${AnalyzerSources}
         ../include/SimplePass.h
         ../include/Checker.h
         ../include/FuncAnalyzer.h
-        ../include/MLChecker.h)
+        ../include/MLChecker.h
+        ../include/UAFChecker.h)
 
 find_package(LLVM 12 REQUIRED)
 

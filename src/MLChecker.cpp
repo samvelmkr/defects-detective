@@ -7,19 +7,18 @@ MLChecker::MLChecker(Function *func, FuncAnalyzer *analyzer)
       funcInfo(analyzer) {}
 
 bool MLChecker::hasMallocFreePath(MallocedObject *obj, Instruction *free) {
-  errs() << "stsart " << *free << "\n";
   return funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
                        free,
-      // Termination condition
                        [obj, free](Instruction *curr) {
+                         // Termination condition
                          if (curr == obj->getMallocCall()) {
-                           obj->setFreeCall(free);
+                           obj->addFreeCall(free);
                            return true;
                          }
                          return false;
                        },
-      // Continue condition
                        [](Instruction *curr) {
+                         // Continue condition
                          if (curr->getOpcode() == Instruction::GetElementPtr) {
                            return true;
                          }
@@ -60,16 +59,66 @@ bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *fr
                            }
                          }
                          if (reachedSecondGEP && curr == obj->getMallocCall()) {
-                           obj->setFreeCall(free);
+                           obj->addFreeCall(free);
                            return true;
                          }
                          return false;
                        });
 }
 
+Instruction* MLChecker::hasCmpWithNull(Instruction *icmp) {
+  Instruction *opInst = nullptr;
+  bool compareWithNull = false;
+  for (Use &op : icmp->operands()) {
+    compareWithNull = isa<ConstantPointerNull>(op);
+    if (!compareWithNull && isa<Instruction>(op)) {
+      opInst = dyn_cast<Instruction>(op);
+    }
+  }
+
+  if (compareWithNull) {
+    return opInst;
+  }
+
+  return nullptr;
+}
+
+bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction *inst) {
+  Instruction* operand = hasCmpWithNull(inst);
+  if (!operand) {
+    return false;
+  }
+
+  Instruction *malloc = path.front();
+  if (!funcInfo->hasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
+    return false;
+  }
+
+  auto it = std::find(path.begin(), path.end(), inst);
+  auto *br = dyn_cast<BranchInst>(*(++it));
+  Value *Condition = br->getCondition();
+
+  if (it + 1 == path.end()) {
+    return false;
+  }
+
+  auto *iCmp = dyn_cast<ICmpInst>(inst);
+  ICmpInst::Predicate predicate = iCmp->getPredicate();
+
+  if (br->isConditional() && br->getNumSuccessors() == 2) {
+    auto* trueBr = br->getSuccessor(0);
+    auto* falseBr = br->getSuccessor(1);
+    Instruction* next = *(++it);
+    if ((predicate == CmpInst::ICMP_EQ && next->getParent() == trueBr) ||
+      (predicate == CmpInst::ICMP_NE && next->getParent() == falseBr)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vector<Instruction *> &path) {
   Instruction *malloc = path[0];
-  errs() << "MALLOC: " << *malloc << " | base: " << *(funcInfo->mallocedObjs[malloc]->getBaseInst()) << "\n";
 
   bool mallocWithOffset = funcInfo->mallocedObjs[malloc]->isMallocedWithOffset();
   bool foundMallocFreePath = false;
@@ -82,39 +131,65 @@ std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vecto
         break;
       }
     }
+
+    if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
+      // Malloced instruction value is null. No need free call on this path.
+      return {};
+    }
   }
 
-  errs() << "\tfound: " << foundMallocFreePath << "\n";
-
   if (!foundMallocFreePath) {
-    Instruction *endInst = funcInfo->getRet();
+    Instruction *endInst = path.back();
     if (mallocWithOffset) {
       MallocedObject *main = funcInfo->mallocedObjs[malloc]->getMainObj();
       if (main->isDeallocated()) {
-        endInst = main->getFreeCall();
+        // FIXME: take free corresponding to path
+        endInst = main->getFreeCalls().front();
       }
     }
-    errs() << "Mem LEAK trace: " << *malloc << " | " << *endInst << "\n";
     return {malloc, endInst};
   }
 
   return {};
 }
 
+void MLChecker::ProcessTermInstOfPath(std::vector<Instruction *> &path) {
+  Instruction *lastInst = path.back();
+  if (lastInst->getOpcode() != Instruction::Ret) {
+    return;
+  }
+  BasicBlock *termBB = lastInst->getParent();
+  if (termBB->getInstList().size() != 2) {
+    return;
+  }
+  Instruction *firstInst = &termBB->getInstList().front();
+  if (firstInst->getOpcode() != Instruction::Load) {
+    return;
+  }
+  path.pop_back();
+  path.pop_back();
+}
+
 std::pair<Instruction *, Instruction *> MLChecker::Check() {
   auto mallocCalls = funcInfo->getCalls(CallInstruction::Malloc);
-  errs() << "   malloc SIZE: " << mallocCalls.size() << "\n";
+  if (mallocCalls.empty()) {
+    return {};
+  }
+
   for (Instruction *malloc : mallocCalls) {
     funcInfo->CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
   }
 
-  errs() << "NUM of PATHs" << allMallocRetPaths.size() << "\n";
-  for (const auto &path : allMallocRetPaths) {
-    for (auto &inst : path) {
-      errs() << *inst << "\n\t|\n";
-    }
-    errs() << "\n";
+  for (auto &path : allMallocRetPaths) {
+    ProcessTermInstOfPath(path);
   }
+//  errs() << "NUM of PATHs" << allMallocRetPaths.size() << "\n";
+//  for (const auto &path : allMallocRetPaths) {
+//    for (auto &inst : path) {
+//      errs() << *inst << "\n\t|\n";
+//    }
+//    errs() << "\n";
+//  }
 
   for (auto &path : allMallocRetPaths) {
     std::pair<Instruction *, Instruction *> mlTrace = checkFreeExistence(path);

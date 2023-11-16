@@ -91,12 +91,33 @@ void SimplePass::analyze(Module &M) {
   Sarif GenSarif;
 
   auto checker = std::make_shared<Checker>(M);
-  std::pair<Instruction*, Instruction*> mlLoc = checker->MLCheck();
-  if (mlLoc.first && mlLoc.second) {
-    auto Trace = createTraceOfPairInst(mlLoc.first, mlLoc.second);
-    GenSarif.addResult(BugReport(Trace, "memory-leak", 1));
+  auto mlLoc = checker->MLCheck();
+  if (mlLoc) {
+//    errs() << mlLoc->getType().first << ": " << *mlLoc->getTrace().first << "|" <<  *mlLoc->getTrace().second << "\n";
+    auto Trace = createTraceOfPairInst(mlLoc->getTrace().first, mlLoc->getTrace().second);
+    GenSarif.addResult(BugReport(Trace, mlLoc->getType().first, mlLoc->getType().second));
+    GenSarif.save();
+    return;
   }
-  GenSarif.save();
+
+  auto uafLoc = checker->UAFCheck();
+  if (uafLoc) {
+//    errs() << uafLoc->getType().first << ": " << *uafLoc->getTrace().first << "|" <<  *uafLoc->getTrace().second << "\n";
+    auto Trace = createTraceOfPairInst(uafLoc->getTrace().first, uafLoc->getTrace().second);
+    GenSarif.addResult(BugReport(Trace, uafLoc->getType().first, uafLoc->getType().second));
+    GenSarif.save();
+    return;
+  }
+
+  auto bofLoc = checker->BOFCheck();
+  if (bofLoc) {
+//    errs() << bofLoc->getType().first << ": " << *bofLoc->getTrace().first << "|" <<  *bofLoc->getTrace().second << "\n";
+    auto Trace = createTraceOfPairInst(bofLoc->getTrace().first, bofLoc->getTrace().second);
+    GenSarif.addResult(BugReport(Trace, bofLoc->getType().first, bofLoc->getType().second));
+    GenSarif.save();
+    return;
+  }
+
 }
 
 /// Register the pass.
