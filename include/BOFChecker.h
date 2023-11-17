@@ -11,9 +11,12 @@ class BOFChecker {
   Function* function;
   FuncAnalyzer* funcInfo;
 
+  std::unordered_map<std::string, Value *> variableValues;
+
   static unsigned int GetFormatStringSize(GlobalVariable *var);
   static unsigned int GetArraySize(AllocaInst *pointerArray);
 
+  void ValueAnalysis();
 public:
   BOFChecker(Function* func, FuncAnalyzer* analyzer);
   std::pair<Instruction*, Instruction*> ScanfValidation();
