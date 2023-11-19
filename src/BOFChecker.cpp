@@ -72,34 +72,134 @@ std::pair<Instruction *, Instruction *> BOFChecker::ScanfValidation() {
   return {};
 }
 
-void BOFChecker::ValueAnalysis() {
-  size_t numOfVariables = 0;
+size_t BOFChecker::GetMallocedSize(llvm::Instruction *malloc) {
+  auto *opInst = dyn_cast<Instruction>(malloc->getOperand(0));
 
-  for (auto &bb : *function) {
-    errs() << "Analyzing Basic Block: " << bb.getName() << "\n";
-    for (auto &inst : bb) {
-      if (inst.getOpcode() == Instruction::Alloca) {
-        if (!inst.hasName()) {
-          inst.setName("var" + std::to_string(++numOfVariables));
-        }
-        variableValues[inst.getName().str()] = dyn_cast<Value>(&inst);
+  Instruction *sizeInst;
 
-      } else if (inst.getOpcode() == Instruction::Store) {
-        auto *storeInst = dyn_cast<StoreInst>(&inst);
-        Value *storedValue = storeInst->getValueOperand();
-        if (!isa<Constant>(storedValue)) {
-          continue;
-        }
-        errs() << inst << "\n\tpointer op: " << *storeInst->getPointerOperand() << "\n";
-        errs() << "storedValue" << *storedValue << "\n\n";
-        variableValues[storeInst->getPointerOperand()->getName().str()] = storedValue;
-//      } else if (LoadInst *Load = dyn_cast<LoadInst>(&I)) {
-//        // Track the values loaded from variables
-//        Value *LoadedValue = variableValues[Load->getPointerOperand()->getName()];
-//        errs() << "Loaded Value: " << *LoadedValue << "\n";
-      }
-    }
+  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
+                opInst,
+                [&sizeInst](Instruction *curr) {
+                  if (curr->getOpcode() == Instruction::Load ||
+                      curr->getOpcode() == Instruction::Alloca) {
+                    sizeInst = curr;
+                    return true;
+                  }
+                  return false;
+                });
+
+  if (variableValues.find(sizeInst->getName().str()) == variableValues.end() ||
+      !variableValues[sizeInst->getName().str()]) {
+    llvm::report_fatal_error("Cannot find malloc size");
   }
+
+  int64_t size = variableValues[sizeInst->getName().str()];
+  if (size < 0) {
+    llvm::report_fatal_error("Negative size of allocated memory");
+  }
+  return static_cast<size_t>(size);
+}
+
+size_t BOFChecker::GetGepOffset(GetElementPtrInst *gep) {
+  auto *opInst = dyn_cast<Instruction>(gep->getOperand(1));
+
+  Instruction *offsetInst;
+
+  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
+                opInst,
+                [&offsetInst](Instruction *curr) {
+                  if (curr->getOpcode() == Instruction::Load ||
+                      curr->getOpcode() == Instruction::Alloca) {
+                    offsetInst = curr;
+                    return true;
+                  }
+                  return false;
+                });
+
+  if (variableValues.find(offsetInst->getName().str()) == variableValues.end() ||
+      !variableValues[offsetInst->getName().str()]) {
+    llvm::report_fatal_error("Cannot find offset");
+  }
+
+  int64_t offset = variableValues[offsetInst->getName().str()];
+  if (offset < 0) {
+    llvm::report_fatal_error("Negative offset of allocated memory");
+  }
+  return static_cast<size_t>(offset);
+}
+
+void BOFChecker::ValueAnalysis(Instruction *inst) {
+
+  if (inst->getOpcode() == Instruction::Alloca) {
+    if (!inst->hasName()) {
+      inst->setName("var" + std::to_string(++numOfVariables));
+    }
+    variableValues[inst->getName().str()] = 0;
+
+  } else if (inst->getOpcode() == Instruction::Store) {
+    auto *storeInst = dyn_cast<StoreInst>(inst);
+    Value *storedValue = storeInst->getValueOperand();
+    if (!isa<ConstantInt>(storedValue)) {
+      return;
+    }
+    auto *constValue = dyn_cast<ConstantInt>(storedValue);
+    variableValues[storeInst->getPointerOperand()->getName().str()] = constValue->getSExtValue();
+
+  } else if (auto *load = dyn_cast<LoadInst>(inst)) {
+    int64_t loadedValue = variableValues[load->getPointerOperand()->getName().str()];
+    if (!inst->hasName()) {
+      inst->setName("var" + std::to_string(++numOfVariables));
+    }
+    variableValues[inst->getName().str()] = loadedValue;
+
+  } else if (inst->getOpcode() == Instruction::Sub) {
+    auto *op1 = dyn_cast<Instruction>(inst->getOperand(0));
+    Value *op2 = inst->getOperand(1);
+    if (!isa<ConstantInt>(op2)) {
+      return;
+    }
+    auto *constValue = dyn_cast<ConstantInt>(op2);
+    variableValues[op1->getName().str()] = variableValues[op1->getName().str()] - constValue->getSExtValue();
+
+  }
+
+}
+
+Instruction *BOFChecker::ProcessMalloc(Instruction *malloc, const std::vector<Instruction *> &geps) {
+  Instruction *start = &*function->getEntryBlock().begin();
+  Instruction *bofInst = nullptr;
+  size_t mallocSize = 0;
+  size_t numOfGeps = geps.size();
+  funcInfo->DFS(AnalyzerMap::ForwardFlowMap,
+                start,
+                [malloc, &mallocSize, geps, &bofInst, &numOfGeps, this](Instruction *curr) {
+                  if (!numOfGeps) {
+                    return true;
+                  }
+                  ValueAnalysis(curr);
+
+                  if (curr == malloc) {
+                    mallocSize = GetMallocedSize(malloc);
+                  }
+                  if (curr->getOpcode() == Instruction::GetElementPtr &&
+                      std::find(geps.begin(), geps.end(), curr) != geps.end()) {
+                    auto *gepInst = dyn_cast<GetElementPtrInst>(curr);
+                    if (mallocSize <= GetGepOffset(gepInst)) {
+                      bofInst = curr;
+                      return true;
+                    }
+                    --numOfGeps;
+                  }
+                  return false;
+                });
+
+  ClearData();
+  return bofInst;
+}
+
+void BOFChecker::ClearData() {
+  variableValues.clear();
+  numOfVariables = 0;
 }
 
 std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker() {
@@ -111,22 +211,20 @@ std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker() {
 //  errs() << "\n~~~~~~~~~~~~~~~~~BDATA~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
 //  funcInfo->printMap(AnalyzerMap::BackwardDependencyMap);
 //  errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
-  ValueAnalysis();
-  errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+
   for (auto &obj : funcInfo->mallocedObjs) {
-    Instruction* malloc = obj.first;
-    errs() << *obj.first << "\n\t base: " << *obj.second->getBaseInst() << "\n";
-    Instruction *base = obj.second->getBaseInst();
-    errs() << base->getName() << "\n";
-    funcInfo->DFS(AnalyzerMap::ForwardDependencyMap, malloc, [](Instruction* curr){
-      if (auto* gep = dyn_cast<GetElementPtrInst>(curr)) {
-        errs() << "op: " <<  *gep->getOperand(0) << "\n";
-        errs() << "op: " <<  *gep->getOperand(1) << "\n";
-        errs() << "pointerop" << *gep->getPointerOperand() << "\n";
-      }
-      return false;
-    });
+    std::vector<Instruction *> geps = funcInfo->CollecedAllGeps(obj.first);
+    if (geps.empty()) {
+      continue;
+    }
+
+    if (auto *bofInst = ProcessMalloc(obj.first, geps)) {
+      return {obj.first, bofInst};
+    }
+
+    variableValues.clear();
   }
+
   return {};
 }
 

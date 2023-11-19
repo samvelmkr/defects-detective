@@ -102,6 +102,8 @@ public:
   bool hasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
 
   std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> mallocedObjs;
+
+  std::vector<Instruction* > CollecedAllGeps(Instruction* malloc);
 };
 
 } // namespace llvm

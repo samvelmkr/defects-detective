@@ -294,6 +294,10 @@ bool FuncAnalyzer::DFS(AnalyzerMap mapID,
       continue;
     }
 
+    if (map->operator[](current).empty()) {
+      // change path
+    }
+
     for (Instruction *next : map->operator[](current)) {
       if (visitedInstructions.find(next) == visitedInstructions.end()) {
         dfsStack.push(next);
@@ -363,6 +367,22 @@ void FuncAnalyzer::CollectPaths(Instruction *from, Instruction *to,
 
 bool FuncAnalyzer::hasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
   return DFS(mapID, from, [to](Instruction *inst) { return inst == to; });
+}
+
+std::vector<Instruction *> FuncAnalyzer::CollecedAllGeps(Instruction *malloc) {
+  if (forwardDependencyMap.find(malloc) == forwardDependencyMap.end()) {
+    return {};
+  }
+
+  std::vector<Instruction*> geps = {};
+  DFS(AnalyzerMap::ForwardDependencyMap, malloc, [&geps] (Instruction* curr) {
+    if (curr->getOpcode() == Instruction::GetElementPtr) {
+      geps.push_back(curr);
+    }
+    return false;
+  });
+
+  return geps;
 }
 
 

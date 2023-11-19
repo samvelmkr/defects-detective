@@ -8,20 +8,26 @@
 namespace llvm {
 
 class BOFChecker {
-  Function* function;
-  FuncAnalyzer* funcInfo;
+  Function *function;
+  FuncAnalyzer *funcInfo;
 
-  std::unordered_map<std::string, Value *> variableValues;
+  size_t numOfVariables = 0;
+  // Todo: Perhaps later change to <string, string>
+  std::unordered_map<std::string, int64_t> variableValues;
 
   static unsigned int GetFormatStringSize(GlobalVariable *var);
   static unsigned int GetArraySize(AllocaInst *pointerArray);
 
-  void ValueAnalysis();
+  Instruction *ProcessMalloc(Instruction *malloc, const std::vector<Instruction *> &geps);
+  void ValueAnalysis(Instruction *inst);
+  size_t GetMallocedSize(Instruction *malloc);
+  size_t GetGepOffset(GetElementPtrInst *gep);
+  void ClearData();
 public:
-  BOFChecker(Function* func, FuncAnalyzer* analyzer);
-  std::pair<Instruction*, Instruction*> ScanfValidation();
-  std::pair<Instruction*, Instruction*> OutOfBoundAccessChecker();
-  std::pair<Instruction*, Instruction*> Check();
+  BOFChecker(Function *func, FuncAnalyzer *analyzer);
+  std::pair<Instruction *, Instruction *> ScanfValidation();
+  std::pair<Instruction *, Instruction *> OutOfBoundAccessChecker();
+  std::pair<Instruction *, Instruction *> Check();
 };
 
 } // namespace llvm
