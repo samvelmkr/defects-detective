@@ -270,10 +270,12 @@ MallocedObject *FuncAnalyzer::findSuitableObj(Instruction *base) {
   return nullptr;
 }
 
+// Todo: improve this (arguments, architecture)
 bool FuncAnalyzer::DFS(AnalyzerMap mapID,
                        Instruction *start,
                        const std::function<bool(Instruction *)> &terminationCondition,
-                       const std::function<bool(Instruction *)> &continueCondition) {
+                       const std::function<bool(Instruction *)> &continueCondition,
+                       const std::function<void(Instruction *)> &getLoopInfo) {
   auto *map = SelectMap(mapID);
 
   std::unordered_set<Instruction *> visitedInstructions;
@@ -301,6 +303,8 @@ bool FuncAnalyzer::DFS(AnalyzerMap mapID,
     for (Instruction *next : map->operator[](current)) {
       if (visitedInstructions.find(next) == visitedInstructions.end()) {
         dfsStack.push(next);
+      } else if (getLoopInfo) {
+        getLoopInfo(current);
       }
     }
   }
@@ -374,8 +378,8 @@ std::vector<Instruction *> FuncAnalyzer::CollecedAllGeps(Instruction *malloc) {
     return {};
   }
 
-  std::vector<Instruction*> geps = {};
-  DFS(AnalyzerMap::ForwardDependencyMap, malloc, [&geps] (Instruction* curr) {
+  std::vector<Instruction *> geps = {};
+  DFS(AnalyzerMap::ForwardDependencyMap, malloc, [&geps](Instruction *curr) {
     if (curr->getOpcode() == Instruction::GetElementPtr) {
       geps.push_back(curr);
     }

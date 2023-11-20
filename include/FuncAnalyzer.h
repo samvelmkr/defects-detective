@@ -90,7 +90,8 @@ public:
   bool DFS(AnalyzerMap mapID,
            Instruction *start,
            const std::function<bool(Instruction *)> &terminationCondition,
-           const std::function<bool(Instruction *)> &continueCondition = nullptr);
+           const std::function<bool(Instruction *)> &continueCondition = nullptr,
+           const std::function<void(Instruction *)> &getLoopInfo = nullptr);
 
   void printMap(AnalyzerMap mapID);
   std::vector<Instruction *> getCalls(const std::string &funcName);
