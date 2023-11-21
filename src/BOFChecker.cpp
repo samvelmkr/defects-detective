@@ -73,13 +73,13 @@ std::pair<Instruction *, Instruction *> BOFChecker::ScanfValidation() {
 }
 
 void BOFChecker::SetLoopScope() {
-  BasicBlock* header = li->GetHeader();
-  Instruction* latch = li->GetLatch();
+  BasicBlock *header = li->GetHeader();
+  Instruction *latch = li->GetLatch();
 
-  std::vector<BasicBlock*> scope;
+  std::vector<BasicBlock *> scope;
   bool startLoopScope = false;
-  BasicBlock* endLoop = latch->getParent();
-  for (auto& bb : *function) {
+  BasicBlock *endLoop = latch->getParent();
+  for (auto &bb : *function) {
     if (&bb == header) {
       startLoopScope = true;
     }
@@ -95,9 +95,44 @@ void BOFChecker::SetLoopScope() {
   li->SetScope(scope);
 }
 
-void BOFChecker::SetLoopVariable() {
-  Instruction* condition = li->GetCondition();
-  Instruction* opInst = condition.
+void BOFChecker::SetLoopHeaderInfo() {
+  Instruction *condition = li->GetCondition();
+  auto *opInst1 = dyn_cast<Instruction>(condition->getOperand(0));
+  Instruction *loopVar;
+  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
+                opInst1,
+                [&loopVar](Instruction *curr) {
+                  if (curr->getOpcode() == Instruction::Alloca) {
+                    loopVar = curr;
+                    return true;
+                  }
+                  return false;
+                });
+
+  li->SetLoopVar(loopVar);
+
+  auto *opInst2 = dyn_cast<Instruction>(condition->getOperand(1));
+  Instruction *loopSize;
+  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
+                opInst2,
+                [&loopSize](Instruction *curr) {
+                  if (curr->getOpcode() == Instruction::Alloca) {
+                    loopSize = curr;
+                    return true;
+                  }
+                  return false;
+                });
+
+  std::pair<int64_t, int64_t> range = {variableValues[loopVar->getName().str()],
+                                       variableValues[loopSize->getName().str()]};
+
+  // validate only ICMP_SLT and ICMP_SLE
+  auto predicate = li->GetPredicate();
+  if (predicate == CmpInst::ICMP_SLT) {
+    --range.second;
+  }
+
+  li->SetRange(range);
 }
 
 void BOFChecker::LoopDetection() {
@@ -131,7 +166,6 @@ void BOFChecker::LoopDetection() {
   BasicBlock *header = brInst->getSuccessor(0);
   li = std::make_unique<LoopsInfo>(header, latch);
   SetLoopScope();
-  SetLoopVariable();
 }
 
 size_t BOFChecker::GetMallocedSize(Instruction *malloc) {
@@ -177,12 +211,6 @@ size_t BOFChecker::GetGepOffset(GetElementPtrInst *gep) {
                   return false;
                 });
 
-  errs() << "\t\toffset " << *offsetInst << "\n";
-
-  for (auto &pair : variableValues) {
-    errs() << "\t\t\t var:" << pair.first << " = " << pair.second << "\n";
-  }
-
   if (variableValues.find(offsetInst->getName().str()) == variableValues.end()) {
     llvm::report_fatal_error("Cannot find offset");
   }
@@ -195,6 +223,9 @@ size_t BOFChecker::GetGepOffset(GetElementPtrInst *gep) {
 }
 
 void BOFChecker::ValueAnalysis(Instruction *inst) {
+  if (li && inst == &*(li->GetHeader()->begin())) {
+    SetLoopHeaderInfo();
+  }
 
   if (inst->getOpcode() == Instruction::Alloca) {
     if (!inst->hasName()) {
@@ -231,7 +262,7 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
 
 }
 
-bool BOFChecker::AccessToOutOfBoundInCycle(GetElementPtrInst *gep) {
+bool BOFChecker::AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t mallocSize) {
   auto *opInst = dyn_cast<Instruction>(gep->getOperand(1));
 
   Instruction *offsetInst;
@@ -246,20 +277,17 @@ bool BOFChecker::AccessToOutOfBoundInCycle(GetElementPtrInst *gep) {
                   return false;
                 });
 
+  if (offsetInst != li->GetLoopVar()) {
+    return false;
+  }
 
-  Instruction* loopVariable;
-  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                opInst,
-                [&loopVariable](Instruction *curr) {
-                  if (curr->getOpcode() == Instruction::Alloca) {
-                    loopVariable = curr;
-                    return true;
-                  }
-                  return false;
-                });
+  std::pair<int64_t, int16_t> range = li->GetRange();
+  if (range.first < 0 || range.second < 0) {
+    llvm::report_fatal_error("Loop range values are negative");
+  }
 
-
-  return false;
+  return mallocSize <= static_cast<size_t>(range.first) ||
+      mallocSize <= static_cast<size_t>(range.second);
 }
 
 // Todo: rename func
@@ -269,8 +297,6 @@ Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj, const std::vector<In
   std::vector<Instruction *> frees = obj->getFreeCalls();
   Instruction *bofInst = nullptr;
   size_t mallocSize = 0;
-
-  errs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
 
   LoopDetection();
 
@@ -282,21 +308,19 @@ Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj, const std::vector<In
                     return true;
                   }
                   ValueAnalysis(curr);
-                  errs() << "CURR: " << *curr << "\n";
+
                   if (curr == malloc) {
                     mallocSize = GetMallocedSize(malloc);
-                    errs() << "\t malloc size: " << mallocSize << "\n";
                   }
                   if (curr->getOpcode() == Instruction::GetElementPtr &&
                       std::find(geps.begin(), geps.end(), curr) != geps.end()) {
                     auto *gepInst = dyn_cast<GetElementPtrInst>(curr);
-                    if (li->hasInst(curr)) {
-                      if (AccessToOutOfBoundInCycle(gepInst)) {
+                    if (li->HasInst(curr)) {
+                      if (AccessToOutOfBoundInCycle(gepInst, mallocSize)) {
                         bofInst = curr;
                         return true;
                       }
                     } else {
-                      errs() << "\t Gep offset: " << GetGepOffset(gepInst) << "\n";
                       if (mallocSize <= GetGepOffset(gepInst)) {
                         bofInst = curr;
                         return true;

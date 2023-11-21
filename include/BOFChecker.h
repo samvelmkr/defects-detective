@@ -12,10 +12,12 @@ private:
   BasicBlock *header;
   Instruction *latch;
   std::vector<BasicBlock *> scope;
-  Instruction *loopVariable = nullptr;
-  ICmpInst::Predicate predicate;
-  std::pair<int, int> range = {};
+  Instruction *loopVariableInst = nullptr;
+
+  std::pair<int64_t, int64_t> range = {};
+
   Instruction *condition;
+  ICmpInst::Predicate predicate;
 
   void ProcessHeader() {
     for (auto &i : *header) {
@@ -44,12 +46,12 @@ public:
     scope = vec;
   }
   void SetLoopVar(Instruction *inst) {
-    loopVariable = inst;
+    loopVariableInst = inst;
   }
-  void SetRange(std::pair<int, int> pair) {
+  void SetRange(std::pair<int64_t, int64_t> pair) {
     range = pair;
   }
-  std::pair<int, int> GetRange() {
+  std::pair<int64_t, int64_t> GetRange() {
     return range;
   }
   BasicBlock* GetHeader() {
@@ -61,6 +63,12 @@ public:
   Instruction *GetCondition() {
     return condition;
   }
+  Instruction* GetLoopVar() {
+    return loopVariableInst;
+  }
+  ICmpInst::Predicate GetPredicate() {
+    return predicate;
+  }
 };
 
 class BOFChecker {
@@ -71,7 +79,7 @@ class BOFChecker {
   // Todo: Perhaps later change to <string, string>
   std::unordered_map<std::string, int64_t> variableValues;
 
-  std::unique_ptr<LoopsInfo> li;
+  std::unique_ptr<LoopsInfo> li = {nullptr};
 
   static unsigned int GetFormatStringSize(GlobalVariable *var);
   static unsigned int GetArraySize(AllocaInst *pointerArray);
@@ -84,8 +92,8 @@ class BOFChecker {
 
   void LoopDetection();
   void SetLoopScope();
-  void SetLoopVariable();
-  bool AccessToOutOfBoundInCycle(GetElementPtrInst *gep);
+  void SetLoopHeaderInfo();
+  bool AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t mallocSize);
 public:
   BOFChecker(Function *func, FuncAnalyzer *analyzer);
   std::pair<Instruction *, Instruction *> ScanfValidation();
