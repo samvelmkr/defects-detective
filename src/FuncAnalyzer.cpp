@@ -1,11 +1,12 @@
 #include "FuncAnalyzer.h"
-#include <stack>
 
 namespace llvm {
 
 const std::string CallInstruction::Malloc = "malloc";
 const std::string CallInstruction::Free = "free";
 const std::string CallInstruction::Scanf = "__isoc99_scanf";
+const std::string CallInstruction::Memcpy = "llvm.memcpy.p0i8.p0i8.i64";
+const std::string CallInstruction::Strlen = "strlen";
 
 bool IsCallWithName(Instruction *inst, const std::string &name) {
   if (auto *callInst = dyn_cast<CallInst>(inst)) {
@@ -72,6 +73,9 @@ void FuncAnalyzer::CollectCalls(Instruction *callInst) {
   if (IsCallWithName(callInst, CallInstruction::Scanf)) {
     callInstructions[CallInstruction::Scanf].push_back(callInst);
   }
+  if (IsCallWithName(callInst, CallInstruction::Memcpy)) {
+    callInstructions[CallInstruction::Memcpy].push_back(callInst);
+  }
 }
 
 std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *FuncAnalyzer::SelectMap(AnalyzerMap mapID) {
@@ -110,6 +114,10 @@ bool FuncAnalyzer::ProcessStoreInsts(Instruction *storeInst) {
   Value *firstOp = sInst->getValueOperand();
   Value *secondOp = sInst->getPointerOperand();
   if (!isa<Constant>(firstOp)) {
+    if (auto *arg = dyn_cast<Argument>(firstOp)) {
+      argumentsMap[arg] = dyn_cast<Instruction>(secondOp);
+      return true;
+    }
     auto *fromInst = dyn_cast<Instruction>(firstOp);
     auto *toInst = dyn_cast<Instruction>(secondOp);
     if (!HasEdge(AnalyzerMap::ForwardDependencyMap, fromInst, toInst)) {
@@ -140,7 +148,7 @@ bool FuncAnalyzer::ProcessGepInsts(Instruction *gInst) {
   return false;
 }
 
-void FuncAnalyzer::UpdateDataDependencies() {
+void FuncAnalyzer::UpdateDataDeps() {
   if (callInstructions.empty() ||
       callInstructions.find(CallInstruction::Malloc) == callInstructions.end()) {
     return;
@@ -206,7 +214,7 @@ void FuncAnalyzer::CreateEdgesInBB(BasicBlock *bb) {
   }
 }
 
-void FuncAnalyzer::ConstructFlow() {
+void FuncAnalyzer::ConstructFlowDeps() {
   // TODO: construct also backward flow graph
   for (auto &bb : *function) {
     CreateEdgesInBB(&bb);
@@ -222,14 +230,8 @@ void FuncAnalyzer::ConstructFlow() {
   }
 }
 
-FuncAnalyzer::FuncAnalyzer(llvm::Function *func) {
-  function = func;
-  const BasicBlock &lastBB = *(--(func->end()));
-  if (!lastBB.empty()) {
-    ret = const_cast<Instruction *>(&*(--(lastBB.end())));
-  }
-
-  for (auto &bb : *func) {
+void FuncAnalyzer::ConstructDataDeps() {
+  for (auto &bb : *function) {
     for (auto &inst : bb) {
       if (inst.getOpcode() == Instruction::Call) {
         CollectCalls(&inst);
@@ -250,15 +252,21 @@ FuncAnalyzer::FuncAnalyzer(llvm::Function *func) {
           AddEdge(AnalyzerMap::BackwardDependencyMap, dependentInst, &inst);
         }
       }
-
     }
   }
+  UpdateDataDeps();
+}
 
-  UpdateDataDependencies();
+FuncAnalyzer::FuncAnalyzer(llvm::Function *func) {
+  function = func;
+  const BasicBlock &lastBB = *(--(func->end()));
+  if (!lastBB.empty()) {
+    ret = const_cast<Instruction *>(&*(--(lastBB.end())));
+  }
 
+  ConstructDataDeps();
   CollectMallocedObjs();
-
-  ConstructFlow();
+  ConstructFlowDeps();
 }
 
 MallocedObject *FuncAnalyzer::findSuitableObj(Instruction *base) {
@@ -314,6 +322,11 @@ bool FuncAnalyzer::DFS(AnalyzerMap mapID,
 void FuncAnalyzer::printMap(AnalyzerMap mapID) {
   auto *map = SelectMap(mapID);
 
+  if (mapID == AnalyzerMap::ForwardDependencyMap && GetArgsNum()) {
+    for (auto &pair : argumentsMap) {
+      errs() << *pair.first << "-->" << *pair.second << "\n";
+    }
+  }
   for (auto &pair : *map) {
     Instruction *to = pair.first;
     std::unordered_set<Instruction *> successors = pair.second;
@@ -369,7 +382,7 @@ void FuncAnalyzer::CollectPaths(Instruction *from, Instruction *to,
   FindPaths(visitedInsts, allPaths, currentPath, from, to);
 }
 
-bool FuncAnalyzer::hasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
+bool FuncAnalyzer::HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
   return DFS(mapID, from, [to](Instruction *inst) { return inst == to; });
 }
 
@@ -387,6 +400,10 @@ std::vector<Instruction *> FuncAnalyzer::CollecedAllGeps(Instruction *malloc) {
   });
 
   return geps;
+}
+
+size_t FuncAnalyzer::GetArgsNum() {
+  return static_cast<size_t>(function->getFunctionType()->getNumParams());
 }
 
 

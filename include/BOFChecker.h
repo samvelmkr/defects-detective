@@ -54,16 +54,16 @@ public:
   std::pair<int64_t, int64_t> GetRange() {
     return range;
   }
-  BasicBlock* GetHeader() {
+  BasicBlock *GetHeader() {
     return header;
   }
-  Instruction* GetLatch() {
+  Instruction *GetLatch() {
     return latch;
   }
   Instruction *GetCondition() {
     return condition;
   }
-  Instruction* GetLoopVar() {
+  Instruction *GetLoopVar() {
     return loopVariableInst;
   }
   ICmpInst::Predicate GetPredicate() {
@@ -98,6 +98,7 @@ public:
   BOFChecker(Function *func, FuncAnalyzer *analyzer);
   std::pair<Instruction *, Instruction *> ScanfValidation();
   std::pair<Instruction *, Instruction *> OutOfBoundAccessChecker();
+  std::pair<Instruction *, Instruction *> MemcpyValidation();
   std::pair<Instruction *, Instruction *> Check();
 };
 

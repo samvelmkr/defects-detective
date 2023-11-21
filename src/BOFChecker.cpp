@@ -173,6 +173,10 @@ void BOFChecker::LoopDetection() {
 }
 
 size_t BOFChecker::GetMallocedSize(Instruction *malloc) {
+  if (auto* constInt = dyn_cast<ConstantInt>(malloc->getOperand(0))) {
+    uint64_t size = constInt->getZExtValue();
+    return static_cast<size_t>(size);
+  }
   auto *opInst = dyn_cast<Instruction>(malloc->getOperand(0));
 
   Instruction *sizeInst;
@@ -358,7 +362,6 @@ std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker() {
     if (geps.empty()) {
       continue;
     }
-
     if (auto *bofInst = ProcessMalloc(obj.second.get(), geps)) {
       return {obj.first, bofInst};
     }
@@ -369,11 +372,64 @@ std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker() {
   return {};
 }
 
+
+
+//bool FuncAnalyzer::HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to, Callinfo) {
+//  return DFS(mapID, from, [to](Instruction *inst) {
+//    if correspond call {
+//      collect callinfo (to which arg connection)
+//      continue
+//    }
+//    return inst == to; });
+//}
+
+//if ( mapID == AnalyzerMap::ForwardDependencyMap) {
+//if (auto* call = dyn_cast<CallInst>(curr)) {
+//if (!call->getFunction()->isDeclarationForLinker()) {
+//
+//}
+//}
+//}
+
+//std::pair<Instruction *, Instruction *> BOFChecker::MemcpyValidation() {
+//  auto memcpyCalls = funcInfo->getCalls(CallInstruction::Memcpy);
+//  if (memcpyCalls.empty()) {
+//    return {};
+//  }
+//
+//  for (Instruction *inst : memcpyCalls) {
+//    auto *call = dyn_cast<CallInst>(inst);
+//
+//    Value *formatStringArg = call->getOperand(0);
+//    auto *bufArg = dyn_cast<GetElementPtrInst>(call->getOperand(1));
+//
+//    Value *basePointer = bufArg->getPointerOperand();
+//    auto *basePointerArr = dyn_cast<AllocaInst>(basePointer);
+//    if (!basePointer) {
+//      return {};
+//    }
+//
+//    if (auto *formatStringGV = dyn_cast<GlobalVariable>(formatStringArg->stripPointerCasts())) {
+//      unsigned formatStringSize = GetFormatStringSize(formatStringGV);
+//      if (!formatStringSize) {
+//        return {basePointerArr, inst};
+//      }
+//      if (formatStringSize >= GetArraySize(basePointerArr)) {
+//        return {basePointerArr, inst};
+//      }
+//    }
+//
+//  }
+//
+//  return {};
+//}
+
 std::pair<Instruction *, Instruction *> BOFChecker::Check() {
   auto scanfBOF = ScanfValidation();
   if (scanfBOF.first && scanfBOF.second) {
     return scanfBOF;
   }
+
   auto outOfBoundAcc = OutOfBoundAccessChecker();
   if (outOfBoundAcc.first && outOfBoundAcc.second) {
     return outOfBoundAcc;

@@ -39,11 +39,13 @@ private:
   Module *module;
   Function *mainFunc;
   std::unique_ptr<CallGraph> callGraph;
-  std::queue<Function *> funcQueue;
+  std::vector<Function *> funcQueue;
 
-  std::unordered_map<Function *, FuncAnalyzer> funcAnalysis;
+  std::unordered_map<Function *, std::unique_ptr<FuncAnalyzer>> funcAnalysis;
 
   std::unique_ptr<BugTrace> bug;
+
+  void AnalyzeFunctions();
 public:
   Checker(Module &m);
 

@@ -3,10 +3,12 @@
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Argument.h"
 #include "llvm/IR/Instructions.h"
 
 #include <unordered_set>
 #include <utility>
+#include <stack>
 
 namespace llvm {
 
@@ -37,6 +39,8 @@ struct CallInstruction {
   static const std::string Malloc;
   static const std::string Free;
   static const std::string Scanf;
+  static const std::string Memcpy;
+  static const std::string Strlen;
 };
 
 enum AnalyzerMap {
@@ -58,6 +62,8 @@ private:
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> forwardFlowMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> backwardFlowMap;
 
+  std::unordered_map<Argument *, Instruction*> argumentsMap;
+
   void CollectCalls(Instruction *callInst);
 
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *SelectMap(AnalyzerMap mapID);
@@ -68,19 +74,22 @@ private:
 
   bool ProcessStoreInsts(Instruction *storeInst);
   bool ProcessGepInsts(Instruction *gepInst);
-  void UpdateDataDependencies();
+  void UpdateDataDeps();
+  void ConstructDataDeps();
 
   static size_t CalculateOffset(GetElementPtrInst *inst);
   void CollectMallocedObjs();
 
   void CreateEdgesInBB(BasicBlock *bb);
-  void ConstructFlow();
+  void ConstructFlowDeps();
 
   void FindPaths(std::unordered_set<Instruction *> &visitedInsts,
                  std::vector<std::vector<Instruction *>> &paths,
                  std::vector<Instruction *> &currentPath,
                  Instruction *from,
                  Instruction *to);
+
+  void ProcessArgs();
 public:
   FuncAnalyzer() {}
   FuncAnalyzer(Function *func);
@@ -100,11 +109,13 @@ public:
   void CollectPaths(Instruction *from, Instruction *to,
                     std::vector<std::vector<Instruction *>> &allPaths);
 
-  bool hasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
+  bool HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
 
   std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> mallocedObjs;
 
   std::vector<Instruction* > CollecedAllGeps(Instruction* malloc);
+
+  size_t GetArgsNum();
 };
 
 } // namespace llvm

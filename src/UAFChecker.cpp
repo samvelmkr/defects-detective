@@ -36,7 +36,7 @@ std::pair<Instruction *, Instruction *> UAFChecker::Check() {
           funcInfo->DFS(AnalyzerMap::ForwardFlowMap,
                         free,
                         [malloc, free, &useAfterFree, this](Instruction *curr) {
-                          if (curr != free && funcInfo->hasPath(AnalyzerMap::BackwardDependencyMap, curr, malloc)) {
+                          if (curr != free && funcInfo->HasPath(AnalyzerMap::BackwardDependencyMap, curr, malloc)) {
                             useAfterFree = curr;
                             return true;
                           }

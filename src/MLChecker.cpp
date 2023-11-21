@@ -90,7 +90,7 @@ bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction
   }
 
   Instruction *malloc = path.front();
-  if (!funcInfo->hasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
+  if (!funcInfo->HasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
     return false;
   }
 
