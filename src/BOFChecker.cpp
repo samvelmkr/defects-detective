@@ -155,6 +155,10 @@ void BOFChecker::LoopDetection() {
                   return true;
                 });
 
+  if (!latch) {
+    return;
+  }
+
   if (latch->getOpcode() != Instruction::Br) {
     return;
   }
@@ -315,7 +319,7 @@ Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj, const std::vector<In
                   if (curr->getOpcode() == Instruction::GetElementPtr &&
                       std::find(geps.begin(), geps.end(), curr) != geps.end()) {
                     auto *gepInst = dyn_cast<GetElementPtrInst>(curr);
-                    if (li->HasInst(curr)) {
+                    if (li && li->HasInst(curr)) {
                       if (AccessToOutOfBoundInCycle(gepInst, mallocSize)) {
                         bofInst = curr;
                         return true;
