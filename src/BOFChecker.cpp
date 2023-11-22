@@ -208,6 +208,11 @@ size_t BOFChecker::GetMallocedSize(Instruction *malloc) {
 }
 
 size_t BOFChecker::GetGepOffset(GetElementPtrInst *gep) {
+  if (auto *constInt = dyn_cast<ConstantInt>(gep->getOperand(1))) {
+    uint64_t offset = constInt->getZExtValue();
+    return static_cast<size_t>(offset);
+  }
+
   FuncAnalyzer *funcInfo = funcAnalysis[gep->getFunction()].get();
   auto *opInst = dyn_cast<Instruction>(gep->getOperand(1));
 
