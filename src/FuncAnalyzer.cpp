@@ -413,16 +413,7 @@ bool FuncAnalyzer::HasPathToSpecificTypeOfInst(AnalyzerMap mapID, Instruction *f
   return DFS(mapID, from, [mapID, type, callInfo, &prev](Instruction *curr) {
     if (callInfo && mapID == AnalyzerMap::ForwardDependencyMap) {
       if (auto *call = dyn_cast<CallInst>(curr)) {
-        if (!call->getFunction()->isDeclarationForLinker() &&
-            !IsCallWithName(curr, CallInstruction::Memcpy)) {
-          callInfo->call = call;
-          if (prev) {
-            if (prev == call->getOperand(0)) {
-              callInfo->argNum = 0;
-            }
-            callInfo->argNum = 1;
-          }
-        }
+        
       }
     }
     prev = curr;
@@ -448,6 +439,21 @@ std::vector<Instruction *> FuncAnalyzer::CollecedAllGeps(Instruction *malloc) {
 
 size_t FuncAnalyzer::GetArgsNum() {
   return static_cast<size_t>(function->getFunctionType()->getNumParams());
+}
+
+std::vector<Instruction *> FuncAnalyzer::CollecedAllDepInst(Instruction *from,
+                                                            const std::function<bool(Instruction *)> &type,
+                                                            CallDataDepInfo *callInfo) {
+  std::vector<Instruction *> insts = {};
+  DFS(AnalyzerMap::ForwardDependencyMap,
+      from, [&insts, &type](Instruction *curr) {
+        if (type(curr)) {
+          insts.push_back(curr);
+        }
+        return false;
+      });
+
+  return insts;
 }
 
 

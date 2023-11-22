@@ -47,6 +47,19 @@ class CallDataDepInfo {
 public:
   CallInst *call = nullptr;
   size_t argNum = SIZE_MAX;
+
+  CallDataDepInfo(CallInst* cInst) {
+    if (!call->getFunction()->isDeclarationForLinker() &&
+        !IsCallWithName(dyn_cast<Instruction>(cInst), CallInstruction::Memcpy)) {
+      call = cInst;
+      if (prev) {
+        if (prev == call->getOperand(0)) {
+          callInfo->argNum = 0;
+        }
+        callInfo->argNum = 1;
+      }
+    }
+  }
 };
 
 enum AnalyzerMap {
@@ -125,7 +138,9 @@ public:
 
   std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> mallocedObjs;
 
-  std::vector<Instruction *> CollecedAllGeps(Instruction *malloc);
+  std::vector<Instruction *> CollecedAllDepInst(Instruction *from,
+                                                const std::function<bool(Instruction *)> &type,
+                                                CallDataDepInfo *callInfo = nullptr);
 
   size_t GetArgsNum();
 };

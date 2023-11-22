@@ -310,8 +310,32 @@ bool BOFChecker::AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t malloc
       mallocSize <= static_cast<size_t>(range.second);
 }
 
+bool BOFChecker::IsBOFGep(GetElementPtrInst* gep, size_t mallocSize) {
+  if (li && li->HasInst(dyn_cast<Instruction>(gep))) {
+    return AccessToOutOfBoundInCycle(gep, mallocSize);
+  }
+  return mallocSize <= GetGepOffset(gep);
+}
+
+Instruction* BOFChecker::FindBOFInst(Instruction* inst, size_t mallocSize,
+                                     const std::vector<Instruction *> &geps) {
+  // Analyse geps
+  if (inst->getOpcode() == Instruction::GetElementPtr &&
+      std::find(geps.begin(), geps.end(), inst) != geps.end()) {
+    auto *gepInst = dyn_cast<GetElementPtrInst>(inst);
+    if (IsBOFGep(gepInst, mallocSize)) {
+      return inst;
+    }
+  }
+
+  if (IsCallWithName(inst, CallInstruction::Memcpy)) {
+
+  }
+  return nullptr;
+}
+
 // Todo: rename func
-Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj, const std::vector<Instruction *> &geps) {
+Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj) {
   Instruction *malloc = obj->getMallocCall();
   Function *function = malloc->getFunction();
   FuncAnalyzer *funcInfo = funcAnalysis[function].get();
@@ -321,11 +345,13 @@ Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj, const std::vector<In
   Instruction *bofInst = nullptr;
   size_t mallocSize = 0;
 
+  std::vector<Instruction *> geps = funcInfo->CollecedAllGeps(malloc);
+
   LoopDetection(function);
 
   funcInfo->DFS(AnalyzerMap::ForwardFlowMap,
                 start,
-                [malloc, frees, &mallocSize, geps, &bofInst, this](Instruction *curr) {
+                [malloc, frees, &mallocSize, &bofInst, &geps, this](Instruction *curr) {
                   if (IsCallWithName(curr, CallInstruction::Free) &&
                       std::find(frees.begin(), frees.end(), curr) != frees.end()) {
                     return true;
@@ -335,21 +361,12 @@ Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj, const std::vector<In
                   if (curr == malloc) {
                     mallocSize = GetMallocedSize(malloc);
                   }
-                  if (curr->getOpcode() == Instruction::GetElementPtr &&
-                      std::find(geps.begin(), geps.end(), curr) != geps.end()) {
-                    auto *gepInst = dyn_cast<GetElementPtrInst>(curr);
-                    if (li && li->HasInst(curr)) {
-                      if (AccessToOutOfBoundInCycle(gepInst, mallocSize)) {
-                        bofInst = curr;
-                        return true;
-                      }
-                    } else {
-                      if (mallocSize <= GetGepOffset(gepInst)) {
-                        bofInst = curr;
-                        return true;
-                      }
-                    }
+
+                  bofInst = FindBOFInst(curr, mallocSize, geps)) {
+                    bofInst = curr;
+                    return true;
                   }
+
                   return false;
                 });
 
@@ -365,11 +382,10 @@ void BOFChecker::ClearData() {
 std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *function) {
   FuncAnalyzer *funcInfo = funcAnalysis[function].get();
   for (auto &obj : funcInfo->mallocedObjs) {
-    std::vector<Instruction *> geps = funcInfo->CollecedAllGeps(obj.first);
-    if (geps.empty()) {
-      continue;
-    }
-    if (auto *bofInst = ProcessMalloc(obj.second.get(), geps)) {
+//    if (geps.empty()) {
+//      continue;
+//    }
+    if (auto *bofInst = ProcessMalloc(obj.second.get())) {
       return {obj.first, bofInst};
     }
 

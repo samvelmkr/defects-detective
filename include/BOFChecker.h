@@ -83,7 +83,12 @@ class BOFChecker {
   static unsigned int GetFormatStringSize(GlobalVariable *var);
   static unsigned int GetArraySize(AllocaInst *pointerArray);
 
-  Instruction *ProcessMalloc(MallocedObject *obj, const std::vector<Instruction *> &geps);
+  Instruction* FindBOFInst(Instruction* inst, size_t mallocSize,
+                           const std::vector<Instruction *> &geps);
+  bool IsBOFGep(GetElementPtrInst* gep, size_t mallocSize);
+  bool IsCorrespondingMemcpy(Instruction* mc, Instruction* malloc);
+
+  Instruction *ProcessMalloc(MallocedObject *obj);
   void ValueAnalysis(Instruction *inst);
   size_t GetMallocedSize(Instruction *malloc);
   size_t GetGepOffset(GetElementPtrInst *gep);
