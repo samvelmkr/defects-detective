@@ -72,8 +72,7 @@ public:
 };
 
 class BOFChecker {
-  Function *function;
-  FuncAnalyzer *funcInfo;
+  std::unordered_map<Function *, std::shared_ptr<FuncAnalyzer>> funcAnalysis;
 
   size_t numOfVariables = 0;
   // Todo: Perhaps later change to <string, string>
@@ -90,16 +89,20 @@ class BOFChecker {
   size_t GetGepOffset(GetElementPtrInst *gep);
   void ClearData();
 
-  void LoopDetection();
-  void SetLoopScope();
+  void LoopDetection(Function *function);
+  void SetLoopScope(Function *function);
   void SetLoopHeaderInfo();
   bool AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t mallocSize);
+
+  bool IsCorrectMemcpy(Instruction *mcInst);
+  std::pair<Instruction *, Instruction *> FindBOFAfterWrongMemcpy(Instruction *mcInst);
+  Instruction *FindStrlenUsage(Instruction *alloca);
 public:
-  BOFChecker(Function *func, FuncAnalyzer *analyzer);
-  std::pair<Instruction *, Instruction *> ScanfValidation();
-  std::pair<Instruction *, Instruction *> OutOfBoundAccessChecker();
-  std::pair<Instruction *, Instruction *> MemcpyValidation();
-  std::pair<Instruction *, Instruction *> Check();
+  BOFChecker(const std::unordered_map<Function *, std::shared_ptr<llvm::FuncAnalyzer>> &funcInfos);
+  std::pair<Instruction *, Instruction *> ScanfValidation(Function *function);
+  std::pair<Instruction *, Instruction *> OutOfBoundAccessChecker(Function *function);
+  std::pair<Instruction *, Instruction *> MemcpyValidation(Function *function);
+  std::pair<Instruction *, Instruction *> Check(Function *function);
 };
 
 } // namespace llvm

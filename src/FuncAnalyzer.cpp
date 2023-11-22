@@ -192,7 +192,7 @@ void FuncAnalyzer::CollectMallocedObjs() {
 
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
         Instruction *next = *(forwardDependencyMap[current].begin());
-        obj->setOffset(findSuitableObj(next), offset);
+        obj->setOffset(FindSuitableObj(next), offset);
         mallocedObjs[mallocInst] = obj;
         return true;
       }
@@ -269,7 +269,7 @@ FuncAnalyzer::FuncAnalyzer(llvm::Function *func) {
   ConstructFlowDeps();
 }
 
-MallocedObject *FuncAnalyzer::findSuitableObj(Instruction *base) {
+MallocedObject *FuncAnalyzer::FindSuitableObj(Instruction *base) {
   for (auto &objPair : mallocedObjs) {
     if (objPair.second->getBaseInst() == base) {
       return objPair.second.get();
@@ -384,6 +384,50 @@ void FuncAnalyzer::CollectPaths(Instruction *from, Instruction *to,
 
 bool FuncAnalyzer::HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
   return DFS(mapID, from, [to](Instruction *inst) { return inst == to; });
+}
+
+bool FuncAnalyzer::FindSpecialDependenceOnArg(Argument *arg,
+                                              size_t argNum,
+                                              const std::function<bool(Instruction *)> &type) {
+  if (!GetArgsNum() || argNum >= GetArgsNum()) {
+    return false;
+  }
+
+  if (argumentsMap.find(arg) == argumentsMap.end()) {
+    return false;
+  }
+
+  // Todo: if there are any callInfo need to validate them, too.
+  Instruction *dependent = argumentsMap[arg];
+  return HasPathToSpecificTypeOfInst(AnalyzerMap::ForwardDependencyMap,
+                                     dependent,
+                                     [&type](Instruction *curr) {
+                                       return type(curr);
+                                     });
+}
+
+bool FuncAnalyzer::HasPathToSpecificTypeOfInst(AnalyzerMap mapID, Instruction *from,
+                                               const std::function<bool(Instruction *)> &type,
+                                               CallDataDepInfo *callInfo) {
+  Instruction *prev;
+  return DFS(mapID, from, [mapID, type, callInfo, &prev](Instruction *curr) {
+    if (callInfo && mapID == AnalyzerMap::ForwardDependencyMap) {
+      if (auto *call = dyn_cast<CallInst>(curr)) {
+        if (!call->getFunction()->isDeclarationForLinker() &&
+            !IsCallWithName(curr, CallInstruction::Memcpy)) {
+          callInfo->call = call;
+          if (prev) {
+            if (prev == call->getOperand(0)) {
+              callInfo->argNum = 0;
+            }
+            callInfo->argNum = 1;
+          }
+        }
+      }
+    }
+    prev = curr;
+    return type(curr);
+  });
 }
 
 std::vector<Instruction *> FuncAnalyzer::CollecedAllGeps(Instruction *malloc) {

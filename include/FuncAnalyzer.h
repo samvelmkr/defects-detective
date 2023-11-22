@@ -43,6 +43,12 @@ struct CallInstruction {
   static const std::string Strlen;
 };
 
+class CallDataDepInfo {
+public:
+  CallInst *call = nullptr;
+  size_t argNum = SIZE_MAX;
+};
+
 enum AnalyzerMap {
   ForwardDependencyMap,
   BackwardDependencyMap,
@@ -62,7 +68,7 @@ private:
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> forwardFlowMap;
   std::unordered_map<Instruction *, std::unordered_set<Instruction *>> backwardFlowMap;
 
-  std::unordered_map<Argument *, Instruction*> argumentsMap;
+  std::unordered_map<Argument *, Instruction *> argumentsMap;
 
   void CollectCalls(Instruction *callInst);
 
@@ -94,7 +100,7 @@ public:
   FuncAnalyzer() {}
   FuncAnalyzer(Function *func);
 
-  MallocedObject *findSuitableObj(Instruction *base);
+  MallocedObject *FindSuitableObj(Instruction *base);
 
   bool DFS(AnalyzerMap mapID,
            Instruction *start,
@@ -111,9 +117,15 @@ public:
 
   bool HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
 
+  bool FindSpecialDependenceOnArg(Argument *arg, size_t argNum,
+                                  const std::function<bool(Instruction *)> &type);
+  bool HasPathToSpecificTypeOfInst(AnalyzerMap mapID, Instruction *from,
+                                   const std::function<bool(Instruction *)> &type,
+                                   CallDataDepInfo *callInfo = nullptr);
+
   std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> mallocedObjs;
 
-  std::vector<Instruction* > CollecedAllGeps(Instruction* malloc);
+  std::vector<Instruction *> CollecedAllGeps(Instruction *malloc);
 
   size_t GetArgsNum();
 };

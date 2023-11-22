@@ -41,7 +41,7 @@ private:
   std::unique_ptr<CallGraph> callGraph;
   std::vector<Function *> funcQueue;
 
-  std::unordered_map<Function *, std::unique_ptr<FuncAnalyzer>> funcAnalysis;
+  std::unordered_map<Function *, std::shared_ptr<FuncAnalyzer>> funcAnalysis;
 
   std::unique_ptr<BugTrace> bug;
 

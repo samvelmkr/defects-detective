@@ -26,7 +26,7 @@ void Checker::AnalyzeFunctions() {
     functionStack.pop();
 
     funcQueue.push_back(current);
-    funcAnalysis[current] = std::make_unique<FuncAnalyzer>(current);
+    funcAnalysis[current] = std::make_shared<FuncAnalyzer>(current);
 
     visitedFunctions.insert(current);
     for (const auto &node : *callGraph->operator[](current)) {
@@ -64,10 +64,9 @@ std::shared_ptr<BugTrace> Checker::UAFCheck() {
 }
 
 std::shared_ptr<BugTrace> Checker::BOFCheck() {
+  std::shared_ptr<BOFChecker> bofChecker = std::make_shared<BOFChecker>(funcAnalysis);
   for (auto currentFunc : funcQueue) {
-
-    std::unique_ptr<BOFChecker> bofChecker = std::make_unique<BOFChecker>(currentFunc, funcAnalysis[currentFunc].get());
-    auto trace = bofChecker->Check();
+    auto trace = bofChecker->Check(currentFunc);
     if (trace.first && trace.second) {
       return std::make_shared<BugTrace>(trace, BugType::MemoryLeak);
     }
