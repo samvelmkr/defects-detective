@@ -57,7 +57,7 @@ std::shared_ptr<BugTrace> Checker::UAFCheck() {
     std::unique_ptr<UAFChecker> uafChecker = std::make_unique<UAFChecker>(currentFunc, funcAnalysis[currentFunc].get());
     auto trace = uafChecker->Check();
     if (trace.first && trace.second) {
-      return std::make_shared<BugTrace>(trace, BugType::MemoryLeak);
+      return std::make_shared<BugTrace>(trace, BugType::UseAfterFree);
     }
   }
   return {nullptr};
@@ -68,7 +68,7 @@ std::shared_ptr<BugTrace> Checker::BOFCheck() {
   for (auto currentFunc : funcQueue) {
     auto trace = bofChecker->Check(currentFunc);
     if (trace.first && trace.second) {
-      return std::make_shared<BugTrace>(trace, BugType::MemoryLeak);
+      return std::make_shared<BugTrace>(trace, BugType::BufferOverFlow);
     }
   }
   return {nullptr};
