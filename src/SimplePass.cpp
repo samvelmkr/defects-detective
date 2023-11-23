@@ -117,7 +117,8 @@ void SimplePass::analyze(Module &M) {
     GenSarif.save();
     return;
   }
-
+  
+  GenSarif.save();
 }
 
 /// Register the pass.
