@@ -63,6 +63,33 @@ bool MallocedObject::isDeallocated() const {
   return !mallocFree.second.empty();
 }
 
+int64_t CalculateOffset(GetElementPtrInst *gep) {
+  Module *module = gep->getModule();
+  DataLayout dataLayout(module->getDataLayout());
+  SmallVector<Value*, 8> indices(gep->op_begin() + 1, gep->op_end());
+
+  Type* elemTy_ptr = gep->getPointerOperandType();
+  errs() << "\nType " << *elemTy_ptr << "\n";
+  uint64_t offset = SIZE_MAX;
+  if (elemTy_ptr->getPointerElementType()->isArrayTy()) {
+    elemTy_ptr = gep->getPointerOperandType()->getPointerElementType();
+    errs() << *elemTy_ptr << "type arr\n";
+    errs() << *elemTy_ptr->getArrayElementType() << "| " << dataLayout.getTypeAllocSize(elemTy_ptr->getArrayElementType()) <<"\n";
+  } else {
+    errs() << "Type " << *elemTy_ptr->getPointerElementType() << "\n";
+  }
+
+  offset = dataLayout.getIndexedOffsetInType(elemTy_ptr->getPointerElementType(), indices);
+  errs() << "\toffset: " << offset << "| type size" << elemTy_ptr->getScalarSizeInBits()
+         << "| " << dataLayout.getPointerTypeSizeInBits(elemTy_ptr) << "\n";
+  errs() << "PointerTypeSize: "  << dataLayout.getPointerTypeSize(elemTy_ptr) << "\n";
+  errs() << "getIndexSize: "  << dataLayout.getIndexSize(offset) << "\n";
+  errs() << "getTypeAllocSize: "  << dataLayout.getTypeAllocSize(elemTy_ptr) << "\n";
+//  errs() << "getTypeAllocSize: "  << dataLayout.getInde << "\n";
+  return static_cast<int64_t>(offset);
+}
+
+
 void FuncAnalyzer::CollectCalls(Instruction *callInst) {
   if (IsCallWithName(callInst, CallInstruction::Malloc)) {
     callInstructions[CallInstruction::Malloc].push_back(callInst);
@@ -161,13 +188,6 @@ void FuncAnalyzer::UpdateDataDeps() {
       }
     }
   }
-}
-
-size_t FuncAnalyzer::CalculateOffset(GetElementPtrInst *inst) {
-  Module *m = inst->getModule();
-  APInt accumulatedOffset;
-  inst->accumulateConstantOffset(m->getDataLayout(), accumulatedOffset);
-  return accumulatedOffset.getZExtValue();
 }
 
 void FuncAnalyzer::CollectMallocedObjs() {
@@ -323,6 +343,7 @@ void FuncAnalyzer::printMap(AnalyzerMap mapID) {
   auto *map = SelectMap(mapID);
 
   if (mapID == AnalyzerMap::ForwardDependencyMap && GetArgsNum()) {
+    errs() << "ARG\n";
     for (auto &pair : argumentsMap) {
       errs() << *pair.first << "-->" << *pair.second << "\n";
     }
@@ -409,19 +430,19 @@ bool FuncAnalyzer::FindSpecialDependenceOnArg(Argument *arg,
 bool FuncAnalyzer::HasPathToSpecificTypeOfInst(AnalyzerMap mapID, Instruction *from,
                                                const std::function<bool(Instruction *)> &type,
                                                CallDataDepInfo *callInfo) {
-  Instruction *prev;
-  return DFS(mapID, from, [mapID, type, callInfo, &prev](Instruction *curr) {
+  Instruction *previous = nullptr;
+  return DFS(mapID, from, [mapID, type, callInfo, &previous](Instruction *curr) {
     if (callInfo && mapID == AnalyzerMap::ForwardDependencyMap) {
       if (auto *call = dyn_cast<CallInst>(curr)) {
-        
+        callInfo->Init(call, previous);
       }
     }
-    prev = curr;
+    previous = curr;
     return type(curr);
   });
 }
 
-std::vector<Instruction *> FuncAnalyzer::CollecedAllGeps(Instruction *malloc) {
+std::vector<Instruction *> FuncAnalyzer::CollectAllGeps(Instruction *malloc) {
   if (forwardDependencyMap.find(malloc) == forwardDependencyMap.end()) {
     return {};
   }
@@ -441,15 +462,48 @@ size_t FuncAnalyzer::GetArgsNum() {
   return static_cast<size_t>(function->getFunctionType()->getNumParams());
 }
 
-std::vector<Instruction *> FuncAnalyzer::CollecedAllDepInst(Instruction *from,
-                                                            const std::function<bool(Instruction *)> &type,
-                                                            CallDataDepInfo *callInfo) {
+std::vector<Instruction *> FuncAnalyzer::CollectSpecialDependenciesOnArg(Argument *arg,
+                                                                         size_t argNum,
+                                                                         const std::function<bool(Instruction *)> &type) {
+  if (!GetArgsNum() || argNum >= GetArgsNum()) {
+    return {};
+  }
+
+  if (argumentsMap.find(arg) == argumentsMap.end()) {
+    return {};
+  }
+
+  // Todo: if there are any callInfo need to validate them, too.
+  Instruction *dependent = argumentsMap[arg];
   std::vector<Instruction *> insts = {};
+
+  return CollectAllDepInst(dependent,
+                           [&type](Instruction *curr) {
+                             return type(curr);
+                           });
+}
+
+std::vector<Instruction *> FuncAnalyzer::CollectAllDepInst(Instruction *from,
+                                                           const std::function<bool(Instruction *)> &type,
+                                                           CallDataDepInfo *callInfo) {
+
+  if (forwardDependencyMap.find(from) == forwardDependencyMap.end()) {
+    return {};
+  }
+
+  std::vector<Instruction *> insts = {};
+  Instruction *previous = nullptr;
   DFS(AnalyzerMap::ForwardDependencyMap,
-      from, [&insts, &type](Instruction *curr) {
+      from, [&insts, &type, callInfo, &previous](Instruction *curr) {
+        if (callInfo) {
+          if (auto *call = dyn_cast<CallInst>(curr)) {
+            callInfo->Init(call, previous);
+          }
+        }
         if (type(curr)) {
           insts.push_back(curr);
         }
+        previous = curr;
         return false;
       });
 

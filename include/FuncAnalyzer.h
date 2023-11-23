@@ -5,6 +5,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/DataLayout.h"
 
 #include <unordered_set>
 #include <utility>
@@ -48,15 +49,19 @@ public:
   CallInst *call = nullptr;
   size_t argNum = SIZE_MAX;
 
-  CallDataDepInfo(CallInst* cInst) {
-    if (!call->getFunction()->isDeclarationForLinker() &&
+  CallDataDepInfo() = default;
+  void Init(CallInst *cInst, Instruction* pred) {
+    if (!cInst->getCalledFunction()->isDeclarationForLinker() &&
         !IsCallWithName(dyn_cast<Instruction>(cInst), CallInstruction::Memcpy)) {
-      call = cInst;
-      if (prev) {
-        if (prev == call->getOperand(0)) {
-          callInfo->argNum = 0;
+      if (pred) {
+        call = cInst;
+        size_t num = 0;
+        for (auto& arg : call->operands()) {
+          if (pred == arg) {
+            argNum = num;
+          }
+          ++num;
         }
-        callInfo->argNum = 1;
       }
     }
   }
@@ -68,6 +73,9 @@ enum AnalyzerMap {
   ForwardFlowMap,
   BackwardFlowMap
 };
+
+int64_t CalculateOffset(GetElementPtrInst *inst);
+
 
 class FuncAnalyzer {
 private:
@@ -96,7 +104,6 @@ private:
   void UpdateDataDeps();
   void ConstructDataDeps();
 
-  static size_t CalculateOffset(GetElementPtrInst *inst);
   void CollectMallocedObjs();
 
   void CreateEdgesInBB(BasicBlock *bb);
@@ -138,10 +145,14 @@ public:
 
   std::unordered_map<Instruction *, std::shared_ptr<MallocedObject>> mallocedObjs;
 
-  std::vector<Instruction *> CollecedAllDepInst(Instruction *from,
-                                                const std::function<bool(Instruction *)> &type,
-                                                CallDataDepInfo *callInfo = nullptr);
+  std::vector<Instruction *> CollectAllGeps(Instruction *malloc);
 
+  std::vector<Instruction *> CollectAllDepInst(Instruction *from,
+                                               const std::function<bool(Instruction *)> &type,
+                                               CallDataDepInfo *callInfo = nullptr);
+  std::vector<Instruction *> CollectSpecialDependenciesOnArg(Argument *arg,
+                                                             size_t argNum,
+                                                             const std::function<bool(Instruction *)> &type);
   size_t GetArgsNum();
 };
 

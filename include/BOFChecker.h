@@ -3,6 +3,7 @@
 
 #include "FuncAnalyzer.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include <sstream>
 
 namespace llvm {
@@ -83,12 +84,16 @@ class BOFChecker {
   static unsigned int GetFormatStringSize(GlobalVariable *var);
   static unsigned int GetArraySize(AllocaInst *pointerArray);
 
-  Instruction* FindBOFInst(Instruction* inst, size_t mallocSize,
-                           const std::vector<Instruction *> &geps);
-  bool IsBOFGep(GetElementPtrInst* gep, size_t mallocSize);
-  bool IsCorrespondingMemcpy(Instruction* mc, Instruction* malloc);
+  Instruction *FindBOFInst(Instruction *inst, size_t mallocSize,
+                           const std::vector<Instruction *> &geps,
+                           const std::vector<Instruction *> &memcpies);
+  bool IsBOFGep(GetElementPtrInst *gep, size_t mallocSize);
+  bool IsCorrespondingMemcpy(Instruction *mc, Instruction *malloc);
+  std::vector<Instruction *> CollectMemcpyInst(Instruction *malloc);
 
   Instruction *ProcessMalloc(MallocedObject *obj);
+
+  std::string GetGepVarName(GetElementPtrInst *gep);
   void ValueAnalysis(Instruction *inst);
   size_t GetMallocedSize(Instruction *malloc);
   size_t GetGepOffset(GetElementPtrInst *gep);
@@ -100,7 +105,8 @@ class BOFChecker {
   bool AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t mallocSize);
 
   bool IsCorrectMemcpy(Instruction *mcInst);
-  std::pair<Instruction *, Instruction *> FindBOFAfterWrongMemcpy(Instruction *mcInst);
+  bool IsCorrectMemcpy2(Instruction *mcInst);
+  Instruction *FindBOFAfterWrongMemcpy(Instruction *mcInst);
   Instruction *FindStrlenUsage(Instruction *alloca);
 public:
   BOFChecker(const std::unordered_map<Function *, std::shared_ptr<llvm::FuncAnalyzer>> &funcInfos);
