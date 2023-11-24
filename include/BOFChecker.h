@@ -76,8 +76,8 @@ class BOFChecker {
   std::unordered_map<Function *, std::shared_ptr<FuncAnalyzer>> funcAnalysis;
 
   size_t numOfVariables = 0;
-  // Todo: Perhaps later change to <string, string>
-  std::unordered_map<std::string, int64_t> variableValues;
+  // Todo: later change to <string, some class reprs var>
+  std::unordered_map<std::string, std::vector<int64_t>> variableValues;
 
   std::unique_ptr<LoopsInfo> li = {nullptr};
 
@@ -94,6 +94,10 @@ class BOFChecker {
   Instruction *ProcessMalloc(MallocedObject *obj);
 
   std::string GetGepVarName(GetElementPtrInst *gep);
+  std::string GetArgName(Argument* arg);
+
+  void StoreConstant(StoreInst* storeInst);
+  void StoreInstruction(StoreInst* storeInst);
   void ValueAnalysis(Instruction *inst);
   size_t GetMallocedSize(Instruction *malloc);
   size_t GetGepOffset(GetElementPtrInst *gep);
@@ -108,6 +112,8 @@ class BOFChecker {
   bool IsCorrectMemcpy2(Instruction *mcInst);
   Instruction *FindBOFAfterWrongMemcpy(Instruction *mcInst);
   Instruction *FindStrlenUsage(Instruction *alloca);
+
+  void printVA();
 public:
   BOFChecker(const std::unordered_map<Function *, std::shared_ptr<llvm::FuncAnalyzer>> &funcInfos);
   std::pair<Instruction *, Instruction *> ScanfValidation(Function *function);

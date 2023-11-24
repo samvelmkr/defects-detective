@@ -69,22 +69,17 @@ int64_t CalculateOffset(GetElementPtrInst *gep) {
   SmallVector<Value*, 8> indices(gep->op_begin() + 1, gep->op_end());
 
   Type* elemTy_ptr = gep->getPointerOperandType();
-  errs() << "\nType " << *elemTy_ptr << "\n";
   uint64_t offset = SIZE_MAX;
   if (elemTy_ptr->getPointerElementType()->isArrayTy()) {
-    elemTy_ptr = gep->getPointerOperandType()->getPointerElementType();
-    errs() << *elemTy_ptr << "type arr\n";
-    errs() << *elemTy_ptr->getArrayElementType() << "| " << dataLayout.getTypeAllocSize(elemTy_ptr->getArrayElementType()) <<"\n";
-  } else {
-    errs() << "Type " << *elemTy_ptr->getPointerElementType() << "\n";
+    elemTy_ptr = gep->getPointerOperandType();
   }
 
   offset = dataLayout.getIndexedOffsetInType(elemTy_ptr->getPointerElementType(), indices);
-  errs() << "\toffset: " << offset << "| type size" << elemTy_ptr->getScalarSizeInBits()
-         << "| " << dataLayout.getPointerTypeSizeInBits(elemTy_ptr) << "\n";
-  errs() << "PointerTypeSize: "  << dataLayout.getPointerTypeSize(elemTy_ptr) << "\n";
-  errs() << "getIndexSize: "  << dataLayout.getIndexSize(offset) << "\n";
-  errs() << "getTypeAllocSize: "  << dataLayout.getTypeAllocSize(elemTy_ptr) << "\n";
+  errs() << "\toffset: " << offset << "\n";
+//         << "| " << dataLayout.getPointerTypeSizeInBits(elemTy_ptr) << "\n";
+//  errs() << "PointerTypeSize: "  << dataLayout.getPointerTypeSize(elemTy_ptr) << "\n";
+//  errs() << "getIndexSize: "  << dataLayout.getIndexSize(offset) << "\n";
+//  errs() << "getTypeAllocSize: "  << dataLayout.getTypeAllocSize(elemTy_ptr) << "\n";
 //  errs() << "getTypeAllocSize: "  << dataLayout.getInde << "\n";
   return static_cast<int64_t>(offset);
 }
