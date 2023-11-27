@@ -45,7 +45,7 @@ struct CallInstruction {
   static const std::string Time;
   static const std::string Srand;
   static const std::string Rand;
-
+  static const std::string Printf;
 };
 
 class CallDataDepInfo {
@@ -54,13 +54,13 @@ public:
   size_t argNum = SIZE_MAX;
 
   CallDataDepInfo() = default;
-  void Init(CallInst *cInst, Instruction* pred) {
+  void Init(CallInst *cInst, Instruction *pred) {
     if (!cInst->getCalledFunction()->isDeclarationForLinker() &&
         !IsCallWithName(dyn_cast<Instruction>(cInst), CallInstruction::Memcpy)) {
       if (pred) {
         call = cInst;
         size_t num = 0;
-        for (auto& arg : call->operands()) {
+        for (auto &arg : call->operands()) {
           if (pred == arg) {
             argNum = num;
           }
@@ -78,9 +78,8 @@ enum AnalyzerMap {
   BackwardFlowMap
 };
 
-
 int64_t CalculateOffset(GetElementPtrInst *inst);
-Instruction* GetCmpNullOperand(Instruction *icmp);
+Instruction *GetCmpNullOperand(Instruction *icmp);
 
 class FuncInfo {
 private:
@@ -97,9 +96,9 @@ private:
 
   void CollectCalls(Instruction *callInst);
 
-  void AddEdge(AnalyzerMap mapID, Value *source, Value *destination);
-  void RemoveEdge(AnalyzerMap mapID, Value *source, Value *destination);
-  bool HasEdge(AnalyzerMap mapID, Value *source, Value *destination);
+  void AddEdge(AnalyzerMap mapID, Value * source, Value * destination);
+  void RemoveEdge(AnalyzerMap mapID, Value * source, Value * destination);
+  bool HasEdge(AnalyzerMap mapID, Value * source, Value * destination);
 
   bool ProcessStoreInsts(Instruction *storeInst);
   bool ProcessGepInsts(Instruction *gepInst);
@@ -113,9 +112,9 @@ private:
 
   bool DFS(AnalyzerMap mapID,
            Instruction *start,
-           const std::function<bool(Instruction *)> &terminationCondition,
-           const std::function<bool(Instruction *)> &continueCondition = nullptr,
-           const std::function<void(Instruction *)> &getLoopInfo = nullptr);
+           const std::function<bool(Value *)> &terminationCondition,
+           const std::function<bool(Value *)> &continueCondition = nullptr,
+           const std::function<void(Value *)> &getLoopInfo = nullptr);
 
   void ProcessArgs();
 public:
@@ -125,8 +124,6 @@ public:
   std::unordered_map<Value *, std::unordered_set<Value *>> *SelectMap(AnalyzerMap mapID);
 
   MallocedObject *FindSuitableObj(Instruction *base);
-
-
 
   void printMap(AnalyzerMap mapID);
   std::vector<Instruction *> getCalls(const std::string &funcName);

@@ -10,6 +10,7 @@ const std::string CallInstruction::Strlen = "strlen";
 const std::string CallInstruction::Time = "time";
 const std::string CallInstruction::Srand = "srand";
 const std::string CallInstruction::Rand = "rand";
+const std::string CallInstruction::Printf = "printf";
 
 bool IsCallWithName(Instruction *inst, const std::string &name) {
   if (auto *callInst = dyn_cast<CallInst>(inst)) {
@@ -78,7 +79,6 @@ int64_t CalculateOffset(GetElementPtrInst *gep) {
   }
 
   offset = dataLayout.getIndexedOffsetInType(elemTy_ptr->getPointerElementType(), indices);
-  errs() << "\toffset: " << offset << "\n";
 //         << "| " << dataLayout.getPointerTypeSizeInBits(elemTy_ptr) << "\n";
 //  errs() << "PointerTypeSize: "  << dataLayout.getPointerTypeSize(elemTy_ptr) << "\n";
 //  errs() << "getIndexSize: "  << dataLayout.getIndexSize(offset) << "\n";
@@ -129,12 +129,12 @@ std::unordered_map<Value *, std::unordered_set<Value *>> *FuncInfo::SelectMap(An
   llvm::report_fatal_error("Not found corresponding map.");
 }
 
-void FuncInfo::AddEdge(AnalyzerMap mapID, Value *source, Value *destination) {
+void FuncInfo::AddEdge(AnalyzerMap mapID, Value * source, Value * destination) {
   auto *map = SelectMap(mapID);
   map->operator[](source).insert(destination);
 }
 
-bool FuncInfo::HasEdge(AnalyzerMap mapID, Value *source, Value *destination) {
+bool FuncInfo::HasEdge(AnalyzerMap mapID, Value * source, Value * destination) {
   auto *map = SelectMap(mapID);
   auto sourceIt = map->find(source);
   if (sourceIt != map->end()) {
@@ -143,7 +143,7 @@ bool FuncInfo::HasEdge(AnalyzerMap mapID, Value *source, Value *destination) {
   return false;
 }
 
-void FuncInfo::RemoveEdge(AnalyzerMap mapID, Value *source, Value *destination) {
+void FuncInfo::RemoveEdge(AnalyzerMap mapID, Value * source, Value * destination) {
   auto *map = SelectMap(mapID);
   if (HasEdge(mapID, source, destination)) {
     map->operator[](source).erase(destination);
@@ -215,17 +215,18 @@ void FuncInfo::CollectMallocedObjs() {
   }
 
   for (Instruction *mallocInst : callInstructions[CallInstruction::Malloc]) {
-    DFS(AnalyzerMap::ForwardDependencyMap, mallocInst, [mallocInst, this](Instruction *current) {
-      if (current->getOpcode() == Instruction::Alloca) {
-        auto obj = std::make_shared<MallocedObject>(current);
+    DFS(AnalyzerMap::ForwardDependencyMap, mallocInst, [mallocInst, this](Value *current) {
+      auto* currentInst = dyn_cast<Instruction>(current);
+      if (currentInst->getOpcode() == Instruction::Alloca) {
+        auto obj = std::make_shared<MallocedObject>(currentInst);
         obj->setMallocCall(mallocInst);
         mallocedObjs[mallocInst] = obj;
         return true;
       }
-      if (current->getOpcode() == Instruction::GetElementPtr) {
-        auto obj = std::make_shared<MallocedObject>(current);
+      if (currentInst->getOpcode() == Instruction::GetElementPtr) {
+        auto obj = std::make_shared<MallocedObject>(currentInst);
         obj->setMallocCall(mallocInst);
-        auto *gep = dyn_cast<GetElementPtrInst>(current);
+        auto *gep = dyn_cast<GetElementPtrInst>(currentInst);
         size_t offset = CalculateOffset(gep);
 
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
@@ -320,16 +321,16 @@ MallocedObject *FuncInfo::FindSuitableObj(Instruction *base) {
 bool FuncInfo::DFS(AnalyzerMap mapID,
                    Instruction *start,
                    const std::function<bool(Value *)> &terminationCondition,
-                   const std::function<bool(Va *)> &continueCondition,
-                   const std::function<void(Instruction *)> &getLoopInfo) {
+                   const std::function<bool(Value *)> &continueCondition,
+                   const std::function<void(Value *)> &getLoopInfo) {
   auto *map = SelectMap(mapID);
 
-  std::unordered_set<Value *> visitedNodes;
+  std::unordered_set<Value *> visitedInstructions;
   std::stack<Value *> dfsStack;
   dfsStack.push(start);
 
   while (!dfsStack.empty()) {
-    Instruction *current = dfsStack.top();
+    Value *current = dfsStack.top();
     dfsStack.pop();
 
     if (terminationCondition(current)) {
@@ -360,17 +361,11 @@ bool FuncInfo::DFS(AnalyzerMap mapID,
 void FuncInfo::printMap(AnalyzerMap mapID) {
   auto *map = SelectMap(mapID);
 
-  if (mapID == AnalyzerMap::ForwardDependencyMap && GetArgsNum()) {
-    errs() << "ARG\n";
-    for (auto &pair : argumentsMap) {
-      errs() << *pair.first << "-->" << *pair.second << "\n";
-    }
-  }
   for (auto &pair : *map) {
-    Instruction *to = pair.first;
-    std::unordered_set<Instruction *> successors = pair.second;
+    Value *to = pair.first;
+    std::unordered_set<Value *> successors = pair.second;
 
-    for (Instruction *successor : successors) {
+    for (Value *successor : successors) {
       errs() << *to << "-->" << *successor << "\n";
     }
   }
@@ -425,108 +420,108 @@ Instruction *FuncInfo::getRet() const {
 //  return DFS(mapID, from, [to](Instruction *inst) { return inst == to; });
 //}
 
-bool FuncInfo::FindSpecialDependenceOnArg(Argument *arg,
-                                          size_t argNum,
-                                          const std::function<bool(Instruction *)> &type) {
-  if (!GetArgsNum() || argNum >= GetArgsNum()) {
-    return false;
-  }
+//bool FuncInfo::FindSpecialDependenceOnArg(Argument *arg,
+//                                          size_t argNum,
+//                                          const std::function<bool(Instruction *)> &type) {
+//  if (!GetArgsNum() || argNum >= GetArgsNum()) {
+//    return false;
+//  }
+//
+//  if (argumentsMap.find(arg) == argumentsMap.end()) {
+//    return false;
+//  }
+//
+//  // Todo: if there are any callInfo need to validate them, too.
+//  Instruction *dependent = argumentsMap[arg];
+//  return HasPathToSpecificTypeOfInst(AnalyzerMap::ForwardDependencyMap,
+//                                     dependent,
+//                                     [&type](Instruction *curr) {
+//                                       return type(curr);
+//                                     });
+//}
 
-  if (argumentsMap.find(arg) == argumentsMap.end()) {
-    return false;
-  }
+//bool FuncInfo::HasPathToSpecificTypeOfInst(AnalyzerMap mapID, Instruction *from,
+//                                           const std::function<bool(Instruction *)> &type,
+//                                           CallDataDepInfo *callInfo) {
+//  Instruction *previous = nullptr;
+//  return DFS(mapID, from, [mapID, type, callInfo, &previous](Instruction *curr) {
+//    if (callInfo && mapID == AnalyzerMap::ForwardDependencyMap) {
+//      if (auto *call = dyn_cast<CallInst>(curr)) {
+//        callInfo->Init(call, previous);
+//      }
+//    }
+//    previous = curr;
+//    return type(curr);
+//  });
+//}
 
-  // Todo: if there are any callInfo need to validate them, too.
-  Instruction *dependent = argumentsMap[arg];
-  return HasPathToSpecificTypeOfInst(AnalyzerMap::ForwardDependencyMap,
-                                     dependent,
-                                     [&type](Instruction *curr) {
-                                       return type(curr);
-                                     });
-}
+//std::vector<Instruction *> FuncInfo::CollectAllGeps(Instruction *malloc) {
+//  if (forwardDependencyMap.find(malloc) == forwardDependencyMap.end()) {
+//    return {};
+//  }
+//
+//  std::vector<Instruction *> geps = {};
+//  DFS(AnalyzerMap::ForwardDependencyMap, malloc, [&geps](Instruction *curr) {
+//    if (curr->getOpcode() == Instruction::GetElementPtr) {
+//      geps.push_back(curr);
+//    }
+//    return false;
+//  });
+//
+//  return geps;
+//}
 
-bool FuncInfo::HasPathToSpecificTypeOfInst(AnalyzerMap mapID, Instruction *from,
-                                           const std::function<bool(Instruction *)> &type,
-                                           CallDataDepInfo *callInfo) {
-  Instruction *previous = nullptr;
-  return DFS(mapID, from, [mapID, type, callInfo, &previous](Instruction *curr) {
-    if (callInfo && mapID == AnalyzerMap::ForwardDependencyMap) {
-      if (auto *call = dyn_cast<CallInst>(curr)) {
-        callInfo->Init(call, previous);
-      }
-    }
-    previous = curr;
-    return type(curr);
-  });
-}
+//size_t FuncInfo::GetArgsNum() {
+//  return static_cast<size_t>(function->getFunctionType()->getNumParams());
+//}
 
-std::vector<Instruction *> FuncInfo::CollectAllGeps(Instruction *malloc) {
-  if (forwardDependencyMap.find(malloc) == forwardDependencyMap.end()) {
-    return {};
-  }
-
-  std::vector<Instruction *> geps = {};
-  DFS(AnalyzerMap::ForwardDependencyMap, malloc, [&geps](Instruction *curr) {
-    if (curr->getOpcode() == Instruction::GetElementPtr) {
-      geps.push_back(curr);
-    }
-    return false;
-  });
-
-  return geps;
-}
-
-size_t FuncInfo::GetArgsNum() {
-  return static_cast<size_t>(function->getFunctionType()->getNumParams());
-}
-
-std::vector<Instruction *> FuncInfo::CollectSpecialDependenciesOnArg(Argument *arg,
-                                                                     size_t argNum,
-                                                                     const std::function<bool(Instruction *)> &type) {
-  if (!GetArgsNum() || argNum >= GetArgsNum()) {
-    return {};
-  }
-
-  if (argumentsMap.find(arg) == argumentsMap.end()) {
-    return {};
-  }
-
-  // Todo: if there are any callInfo need to validate them, too.
-  Instruction *dependent = argumentsMap[arg];
-  std::vector<Instruction *> insts = {};
-
-  return CollectAllDepInst(dependent,
-                           [&type](Instruction *curr) {
-                             return type(curr);
-                           });
-}
-
-std::vector<Instruction *> FuncInfo::CollectAllDepInst(Instruction *from,
-                                                       const std::function<bool(Instruction *)> &type,
-                                                       CallDataDepInfo *callInfo) {
-
-  if (forwardDependencyMap.find(from) == forwardDependencyMap.end()) {
-    return {};
-  }
-
-  std::vector<Instruction *> insts = {};
-  Instruction *previous = nullptr;
-  DFS(AnalyzerMap::ForwardDependencyMap,
-      from, [&insts, &type, callInfo, &previous](Instruction *curr) {
-        if (callInfo) {
-          if (auto *call = dyn_cast<CallInst>(curr)) {
-            callInfo->Init(call, previous);
-          }
-        }
-        if (type(curr)) {
-          insts.push_back(curr);
-        }
-        previous = curr;
-        return false;
-      });
-
-  return insts;
-}
+//std::vector<Instruction *> FuncInfo::CollectSpecialDependenciesOnArg(Argument *arg,
+//                                                                     size_t argNum,
+//                                                                     const std::function<bool(Instruction *)> &type) {
+//  if (!GetArgsNum() || argNum >= GetArgsNum()) {
+//    return {};
+//  }
+//
+//  if (argumentsMap.find(arg) == argumentsMap.end()) {
+//    return {};
+//  }
+//
+//  // Todo: if there are any callInfo need to validate them, too.
+//  Instruction *dependent = argumentsMap[arg];
+//  std::vector<Instruction *> insts = {};
+//
+//  return CollectAllDepInst(dependent,
+//                           [&type](Instruction *curr) {
+//                             return type(curr);
+//                           });
+//}
+//
+//std::vector<Instruction *> FuncInfo::CollectAllDepInst(Instruction *from,
+//                                                       const std::function<bool(Instruction *)> &type,
+//                                                       CallDataDepInfo *callInfo) {
+//
+//  if (forwardDependencyMap.find(from) == forwardDependencyMap.end()) {
+//    return {};
+//  }
+//
+//  std::vector<Instruction *> insts = {};
+//  Instruction *previous = nullptr;
+//  DFS(AnalyzerMap::ForwardDependencyMap,
+//      from, [&insts, &type, callInfo, &previous](Instruction *curr) {
+//        if (callInfo) {
+//          if (auto *call = dyn_cast<CallInst>(curr)) {
+//            callInfo->Init(call, previous);
+//          }
+//        }
+//        if (type(curr)) {
+//          insts.push_back(curr);
+//        }
+//        previous = curr;
+//        return false;
+//      });
+//
+//  return insts;
+//}
 
 
 

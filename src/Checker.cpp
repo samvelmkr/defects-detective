@@ -5,14 +5,11 @@ namespace llvm {
 Checker::Checker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &info)
     : funcInfos(info) {}
 
-//DFSOptions options;
-//options.terminationCondition = [](Instruction *inst) { return false; }; // Replace with your condition
-//options.continueCondition = [](Instruction *inst) { return false; };   // Replace with your condition
-//options.getLoopInfo = [](Instruction *inst) { return false; };         // Replace with your condition
-//
-//DFSContext context{mapID, startInstruction, options};
-
-bool Checker::IsLibraryFunction(Instruction *inst) {
+bool Checker::IsLibraryFunction(Value *val) {
+  if (!isa<Instruction>(val)) {
+    return false;
+  }
+  auto *inst = dyn_cast<Instruction>(val);
   for (const std::string &name : libraryCalls) {
     if (IsCallWithName(inst, name)) {
       return true;
@@ -21,24 +18,22 @@ bool Checker::IsLibraryFunction(Instruction *inst) {
   return false;
 }
 
-DFSResult Checker::DFSTraverse(const DFSContext &context,
-                               std::unordered_set<Instruction *> &visitedInstructions) {
+DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
+                               std::unordered_set<Value *> &visitedNodes) {
 
   DFSResult result;
 
-  FuncInfo *funcInfo = funcInfos[context.start->getFunction()].get();
+  FuncInfo *funcInfo = funcInfos[function].get();
   auto *map = funcInfo->SelectMap(context.mapID);
-
-  std::stack<Instruction *> dfsStack;
+  std::stack<Value *> dfsStack;
   dfsStack.push(context.start);
-
-  Instruction *previous = nullptr;
+  Value *previous = nullptr;
 
   while (!dfsStack.empty()) {
-    Instruction *current = dfsStack.top();
+    Value *current = dfsStack.top();
     dfsStack.pop();
 
-    if (visitedInstructions.find(current) != visitedInstructions.end()) {
+    if (visitedNodes.find(current) != visitedNodes.end()) {
       // Already visited this instruction
       continue;
     }
@@ -58,35 +53,34 @@ DFSResult Checker::DFSTraverse(const DFSContext &context,
       // change path
     }
 
-    visitedInstructions.insert(current);
+    visitedNodes.insert(current);
 
     // Check if the current instruction is a call instruction
     if (auto *callInst = dyn_cast<CallInst>(current)) {
       // Handle call instruction
       Function *calledFunction = callInst->getCalledFunction();
-      if (calledFunction) {
-        if (!calledFunction->isDeclarationForLinker() ||
-            !IsLibraryFunction(current)) {
-          DFSOptions newOptions;
-          newOptions.terminationCondition = context.options.terminationCondition;
-          newOptions.continueCondition = context.options.continueCondition;
-          newOptions.getLoopInfo = context.options.getLoopInfo;
+      if (calledFunction && !calledFunction->isDeclarationForLinker() &&
+          !IsLibraryFunction(current)) {
 
-          Instruction *startInstruction = nullptr;
-          if (context.mapID == AnalyzerMap::ForwardFlowMap) {
-            startInstruction = &*calledFunction->getEntryBlock().begin();
-          } else if (context.mapID == AnalyzerMap::ForwardDependencyMap) {
-            // Fixme: find corresponding arg and start tracking from instruction
-            //  dependent on argument from called function
-            size_t argNum = CalculNumOfArg(callInst, previous);
-            FuncInfo* calledFuncInfo = funcInfos[calledFunction].get();
-            calledFuncInfo->argumentsMap[calledFunction]
-            startInstruction = &*calledFunction->getEntryBlock().begin();
+        Value *nextStart = nullptr;
+        if (context.mapID == AnalyzerMap::ForwardFlowMap) {
+          nextStart = dyn_cast<Value>(calledFunction->getEntryBlock().begin());
+        } else if (context.mapID == AnalyzerMap::ForwardDependencyMap) {
+          auto *previousInst = dyn_cast<Instruction>(previous);
+
+          size_t argNum = CalculNumOfArg(callInst, previousInst);
+          if (argNum > calledFunction->arg_size()) {
+            report_fatal_error("Wrong argument number.");
           }
 
-          DFSContext newContext{context.mapID, startInstruction, newOptions};
+          nextStart = calledFunction->getArg(argNum);
+        }
+
+        if (nextStart) {
+          DFSContext newContext{context.mapID, nextStart, context.options};
+
           // Recursively traverse the called function
-          DFSTraverse(newContext, visitedInstructions);
+          DFSTraverse(calledFunction, newContext, visitedNodes);
           // Process results from the called function if needed
           // ...
 
@@ -97,20 +91,25 @@ DFSResult Checker::DFSTraverse(const DFSContext &context,
     }
     previous = current;
 
-    for (Instruction *next : map->operator[](current)) {
-      if (visitedInstructions.find(next) == visitedInstructions.end()) {
+    for (Value *next : map->operator[](current)) {
+      if (visitedNodes.find(next) == visitedNodes.end()) {
         dfsStack.push(next);
+      } else if (context.options.getLoopInfo && dfsStack) {
+        context.options.getLoopInfo(current);
       }
     }
 
   }
-  result.status = false;
-  return result;
+  result.
+      status = false;
+  return
+      result;
 }
 
 DFSResult Checker::DFS(const DFSContext &context) {
-  std::unordered_set<Instruction *> visitedInstructions;
-  return DFSTraverse(context, visitedInstructions);
+  std::unordered_set<Value *> visitedNodes;
+  Function *function = dyn_cast<Instruction>(context.start)->getFunction();
+  return DFSTraverse(function, context, visitedNodes);
 }
 
 size_t Checker::CalculNumOfArg(llvm::CallInst *cInst,
@@ -127,50 +126,48 @@ size_t Checker::CalculNumOfArg(llvm::CallInst *cInst,
   return SIZE_MAX;
 }
 
-
-
 void Checker::CollectPaths(Instruction *from, Instruction *to,
-                           std::vector<std::vector<Instruction *>> &allPaths) {
+                           std::vector<std::vector<Value *>> &allPaths) {
 
-  std::unordered_set<Instruction *> visitedInsts;
-  std::vector<Instruction *> currentPath;
+  std::unordered_set<Value *> visitedNodes;
+  std::vector<Value *> currentPath;
   Function *function = from->getFunction();
-  FindPaths(visitedInsts, allPaths, currentPath, from, to, function);
+  FindPaths(visitedNodes, allPaths, currentPath, from, to, function);
 }
 
 // Todo: add support of other maps
 // TODO: write iterative algorithm to avoid stack overflow
-void Checker::FindPaths(std::unordered_set<Instruction *> &visitedInsts,
-                        std::vector<std::vector<Instruction *>> &paths,
-                        std::vector<Instruction *> &currentPath,
-                        Instruction *from,
-                        Instruction *to,
+void Checker::FindPaths(std::unordered_set<Value *> &visitedNodes,
+                        std::vector<std::vector<Value *>> &paths,
+                        std::vector<Value *> &currentPath,
+                        Value *from,
+                        Value *to,
                         Function *function) {
-  if (visitedInsts.find(from) != visitedInsts.end()) {
+  if (visitedNodes.find(from) != visitedNodes.end()) {
     return;
   }
-  visitedInsts.insert(from);
+  visitedNodes.insert(from);
   currentPath.push_back(from);
 
   if (from == to) {
     paths.push_back(currentPath);
-    visitedInsts.erase(from);
+    visitedNodes.erase(from);
     currentPath.pop_back();
     return;
   }
 
   FuncInfo *funcInfo = funcInfos[function].get();
 
-  for (Instruction *next : funcInfo->SelectMap(AnalyzerMap::ForwardFlowMap)->operator[](from)) {
-    FindPaths(visitedInsts, paths, currentPath, next, to, function);
+  for (Value *next : funcInfo->SelectMap(AnalyzerMap::ForwardFlowMap)->operator[](from)) {
+    FindPaths(visitedNodes, paths, currentPath, next, to, function);
   }
   currentPath.pop_back();
-  visitedInsts.erase(from);
+  visitedNodes.erase(from);
 
 }
 
-void Checker::ProcessTermInstOfPath(std::vector<Instruction *> &path) {
-  Instruction *lastInst = path.back();
+void Checker::ProcessTermInstOfPath(std::vector<Value *> &path) {
+  auto *lastInst = dyn_cast<Instruction>(path.back());
   if (lastInst->getOpcode() != Instruction::Ret) {
     return;
   }
@@ -188,43 +185,50 @@ void Checker::ProcessTermInstOfPath(std::vector<Instruction *> &path) {
 
 bool Checker::HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
   DFSOptions options;
-  options.terminationCondition = [to](Instruction *inst) { return inst == to; };
+  options.terminationCondition = [to](Value *curr) { return curr == to; };
 
   DFSContext context{mapID, from, options};
   DFSResult result = DFS(context);
   return result.status;
 }
 
-Instruction *Checker::FindInstWithType(Function *function, const std::function<bool(Instruction *)> &typeCond) {
+Instruction *Checker::FindInstWithType(Function *function, AnalyzerMap mapID, Instruction *start,
+                                       const std::function<bool(Instruction *)> &typeCond) {
   Instruction *res = nullptr;
   DFSOptions options;
-  options.terminationCondition = [&res, typeCond](Instruction *curr) {
-    if (typeCond && typeCond(curr)) {
-      res = curr;
+  options.terminationCondition = [&res, typeCond](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+    if (typeCond && typeCond(currInst)) {
+      res = currInst;
       return true;
     }
     return false;
   };
 
-  Instruction *start = &*function->getEntryBlock().begin();
-  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSContext context{mapID, start, options};
   DFS(context);
   return res;
 }
 
-std::vector<Instruction *> Checker::CollectAllInstsWithType(Function *function,
+std::vector<Instruction *> Checker::CollectAllInstsWithType(Function *function, AnalyzerMap mapID, Instruction *start,
                                                             const std::function<bool(Instruction *)> &typeCond) {
   std::vector<Instruction *> results = {};
   DFSOptions options;
-  options.terminationCondition = [&results, typeCond](Instruction *curr) {
-    if (typeCond && typeCond(curr)) {
-      results.push_back(curr);
+  options.terminationCondition = [&results, typeCond](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+    if (typeCond && typeCond(currInst)) {
+      results.push_back(currInst);
     }
     return false;
   };
 
-  Instruction *start = &*function->getEntryBlock().begin();
-  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSContext context{mapID, start, options};
   DFS(context);
   return results;
 }
@@ -232,9 +236,13 @@ std::vector<Instruction *> Checker::CollectAllInstsWithType(Function *function,
 Instruction *Checker::GetDeclaration(Instruction *inst) {
   Instruction *declaration = nullptr;
   DFSOptions options;
-  options.terminationCondition = [&declaration](Instruction *curr) {
-    if (curr->getOpcode() == Instruction::Alloca) {
-      declaration = curr;
+  options.terminationCondition = [&declaration](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+    if (currInst->getOpcode() == Instruction::Alloca) {
+      declaration = currInst;
       return true;
     }
     return false;
@@ -260,9 +268,13 @@ void Checker::LoopDetection(Function *function) {
   Instruction *latch;
 
   DFSOptions options;
-  options.getLoopInfo = [&latch](Instruction *inst) {
+  options.getLoopInfo = [&latch](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
     // loop info
-    latch = inst;
+    latch = currInst;
     // Todo: validate also latch/exit (conditional br: one edge - exit, other - backEdge)
     return true;
   };
@@ -273,7 +285,7 @@ void Checker::LoopDetection(Function *function) {
   if (!latch) {
     return;
   }
-
+  errs() << "LATCH " << *latch << "\n";
   if (latch->getOpcode() != Instruction::Br) {
     return;
   }

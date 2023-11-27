@@ -7,15 +7,23 @@ MLChecker::MLChecker(const std::unordered_map<Function *, std::shared_ptr<FuncIn
 
 bool MLChecker::hasMallocFreePath(MallocedObject *obj, Instruction *free) {
   DFSOptions options;
-  options.terminationCondition = [obj, free](Instruction *curr) {
-    if (curr == free) {
+  options.terminationCondition = [obj, free](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+    if (currInst == free) {
       obj->addFreeCall(free);
       return true;
     }
     return false;
   };
-  options.continueCondition = [](Instruction *curr) {
-    return curr->getOpcode() == Instruction::GetElementPtr;
+  options.continueCondition = [](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+    return currInst->getOpcode() == Instruction::GetElementPtr;
   };
 
   Instruction *malloc = obj->getMallocCall();
@@ -31,23 +39,29 @@ bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *fr
 
   DFSOptions options;
   options.terminationCondition = [obj, &reachedFirstGEP, &reachedAlloca,
-      &reachedSecondGEP, free](Instruction *curr) {
-    if (curr->getOpcode() == Instruction::GetElementPtr) {
-      auto *gep = dyn_cast<GetElementPtrInst>(curr);
+      &reachedSecondGEP, free](Value *curr) {
+
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    if (currInst->getOpcode() == Instruction::GetElementPtr) {
+      auto *gep = dyn_cast<GetElementPtrInst>(currInst);
       if (obj->getOffset() == CalculateOffset(gep)) {
         reachedFirstGEP = true;
       }
     }
-    if (reachedFirstGEP && curr->getOpcode() == Instruction::Alloca) {
+    if (reachedFirstGEP && currInst->getOpcode() == Instruction::Alloca) {
       reachedAlloca = true;
     }
-    if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
-      auto *gep = dyn_cast<GetElementPtrInst>(curr);
+    if (reachedAlloca && currInst->getOpcode() == Instruction::GetElementPtr) {
+      auto *gep = dyn_cast<GetElementPtrInst>(currInst);
       if (obj->getOffset() == CalculateOffset(gep)) {
         reachedSecondGEP = true;
       }
     }
-    if (reachedSecondGEP && curr == free) {
+    if (reachedSecondGEP && currInst == free) {
       obj->addFreeCall(free);
       return true;
     }
@@ -60,13 +74,13 @@ bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *fr
   return result.status;
 }
 
-bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction *inst) {
+bool MLChecker::IsNullMallocedInst(std::vector<Value *> &path, Instruction *inst) {
   Instruction *operand = GetCmpNullOperand(inst);
   if (!operand) {
     return false;
   }
 
-  Instruction *malloc = path.front();
+  auto *malloc = dyn_cast<Instruction>(path.front());
   if (!HasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
     return false;
   }
@@ -85,7 +99,7 @@ bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction
   if (br->isConditional() && br->getNumSuccessors() == 2) {
     auto *trueBr = br->getSuccessor(0);
     auto *falseBr = br->getSuccessor(1);
-    Instruction *next = *(++it);
+    auto *next = dyn_cast<Instruction>(*(++it));
     if ((predicate == CmpInst::ICMP_EQ && next->getParent() == trueBr) ||
         (predicate == CmpInst::ICMP_NE && next->getParent() == falseBr)) {
       return true;
@@ -94,30 +108,32 @@ bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction
   return false;
 }
 
-std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vector<Instruction *> &path) {
-  Instruction *malloc = path[0];
+std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vector<Value *> &path) {
+  auto *malloc = dyn_cast<Instruction>(path.front());
   FuncInfo *funcInfo = funcInfos[malloc->getFunction()].get();
 
   bool mallocWithOffset = funcInfo->mallocedObjs[malloc]->isMallocedWithOffset();
   bool foundMallocFreePath = false;
 
-  for (Instruction *inst : path) {
-    if (IsCallWithName(inst, CallInstruction::Free)) {
-      if ((mallocWithOffset && hasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), inst))
-          || (hasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), inst))) {
-        foundMallocFreePath = true;
-        break;
+  for (Value *val : path) {
+    if (auto *inst = dyn_cast<Instruction>(val)) {
+      if (IsCallWithName(inst, CallInstruction::Free)) {
+        if ((mallocWithOffset && hasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), inst))
+            || (hasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), inst))) {
+          foundMallocFreePath = true;
+          break;
+        }
       }
-    }
 
-    if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
-      // Malloced instruction value is null. No need free call on this path.
-      return {};
+      if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
+        // Malloced instruction value is null. No need free call on this path.
+        return {};
+      }
     }
   }
 
   if (!foundMallocFreePath) {
-    Instruction *endInst = path.back();
+    auto *endInst = dyn_cast<Instruction>(path.back());
     if (mallocWithOffset) {
       MallocedObject *main = funcInfo->mallocedObjs[malloc]->getMainObj();
       if (main->isDeallocated()) {
@@ -166,9 +182,10 @@ std::pair<Instruction *, Instruction *> MLChecker::Check(Function *function) {
 }
 
 std::vector<Instruction *> MLChecker::FindAllMallocCalls(Function *function) {
-  return CollectAllInstsWithType(function, [](Instruction *inst) {
-    return IsCallWithName(inst, CallInstruction::Malloc);
-  });
+  return CollectAllInstsWithType(function, AnalyzerMap::ForwardFlowMap, &*function->getEntryBlock().begin(),
+                                 [](Instruction *inst) {
+                                   return IsCallWithName(inst, CallInstruction::Malloc);
+                                 });
 }
 
 } // namespace llvm
