@@ -1,17 +1,18 @@
 set(AnalyzerSources
     Sarif.cpp
     SimplePass.cpp
+        Analyzer.cpp
     Checker.cpp
-    FuncAnalyzer.cpp
+        FuncInfo.cpp
     MLChecker.cpp
     UAFChecker.cpp
-        BOFChecker.cpp
-        ../include/BOFChecker.h)
+    BOFChecker.cpp)
 
 add_library(Analyzer SHARED ${AnalyzerSources}
         ../include/SimplePass.h
+        ../include/Analyzer.h
         ../include/Checker.h
-        ../include/FuncAnalyzer.h
+        ../include/FuncInfo.h
         ../include/MLChecker.h
         ../include/UAFChecker.h)
 

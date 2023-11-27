@@ -2,95 +2,72 @@
 
 namespace llvm {
 
-MLChecker::MLChecker(Function *func, FuncAnalyzer *analyzer)
-    : function(func),
-      funcInfo(analyzer) {}
+MLChecker::MLChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos)
+    : Checker(funcInfos) {}
 
 bool MLChecker::hasMallocFreePath(MallocedObject *obj, Instruction *free) {
-  return funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                       free,
-                       [obj, free](Instruction *curr) {
-                         // Termination condition
-                         if (curr == obj->getMallocCall()) {
-                           obj->addFreeCall(free);
-                           return true;
-                         }
-                         return false;
-                       },
-                       [](Instruction *curr) {
-                         // Continue condition
-                         if (curr->getOpcode() == Instruction::GetElementPtr) {
-                           return true;
-                         }
-                         return false;
-                       }
-  );
+  DFSOptions options;
+  options.terminationCondition = [obj, free](Instruction *curr) {
+    if (curr == free) {
+      obj->addFreeCall(free);
+      return true;
+    }
+    return false;
+  };
+  options.continueCondition = [](Instruction *curr) {
+    return curr->getOpcode() == Instruction::GetElementPtr;
+  };
+
+  Instruction *malloc = obj->getMallocCall();
+  DFSContext context{AnalyzerMap::ForwardDependencyMap, malloc, options};
+  DFSResult result = DFS(context);
+  return result.status;
 }
 
 bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free) {
-  auto getOffset = [](GetElementPtrInst *gep) {
-    Module *m = gep->getModule();
-    APInt accumulateOffset;
-    if (gep->accumulateConstantOffset(m->getDataLayout(), accumulateOffset)) {
-      return accumulateOffset.getZExtValue();
-    }
-    return SIZE_MAX;
-  };
-
   bool reachedFirstGEP = false;
   bool reachedAlloca = false;
   bool reachedSecondGEP = false;
-  return funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                       free,
-                       [obj, &reachedFirstGEP, &reachedAlloca, &reachedSecondGEP, &getOffset, free](Instruction *curr) {
-                         if (curr->getOpcode() == Instruction::GetElementPtr) {
-                           auto *gep = dyn_cast<GetElementPtrInst>(curr);
-                           if (obj->getOffset() == getOffset(gep)) {
-                             reachedFirstGEP = true;
-                           }
-                         }
-                         if (reachedFirstGEP && curr->getOpcode() == Instruction::Alloca) {
-                           reachedAlloca = true;
-                         }
-                         if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
-                           auto *gep = dyn_cast<GetElementPtrInst>(curr);
-                           if (obj->getOffset() == getOffset(gep)) {
-                             reachedSecondGEP = true;
-                           }
-                         }
-                         if (reachedSecondGEP && curr == obj->getMallocCall()) {
-                           obj->addFreeCall(free);
-                           return true;
-                         }
-                         return false;
-                       });
-}
 
-Instruction* MLChecker::hasCmpWithNull(Instruction *icmp) {
-  Instruction *opInst = nullptr;
-  bool compareWithNull = false;
-  for (Use &op : icmp->operands()) {
-    compareWithNull = isa<ConstantPointerNull>(op);
-    if (!compareWithNull && isa<Instruction>(op)) {
-      opInst = dyn_cast<Instruction>(op);
+  DFSOptions options;
+  options.terminationCondition = [obj, &reachedFirstGEP, &reachedAlloca,
+      &reachedSecondGEP, free](Instruction *curr) {
+    if (curr->getOpcode() == Instruction::GetElementPtr) {
+      auto *gep = dyn_cast<GetElementPtrInst>(curr);
+      if (obj->getOffset() == CalculateOffset(gep)) {
+        reachedFirstGEP = true;
+      }
     }
-  }
+    if (reachedFirstGEP && curr->getOpcode() == Instruction::Alloca) {
+      reachedAlloca = true;
+    }
+    if (reachedAlloca && curr->getOpcode() == Instruction::GetElementPtr) {
+      auto *gep = dyn_cast<GetElementPtrInst>(curr);
+      if (obj->getOffset() == CalculateOffset(gep)) {
+        reachedSecondGEP = true;
+      }
+    }
+    if (reachedSecondGEP && curr == free) {
+      obj->addFreeCall(free);
+      return true;
+    }
+    return false;
+  };
 
-  if (compareWithNull) {
-    return opInst;
-  }
-
-  return nullptr;
+  Instruction *malloc = obj->getMallocCall();
+  DFSContext context{AnalyzerMap::ForwardDependencyMap, malloc, options};
+  DFSResult result = DFS(context);
+  return result.status;
 }
 
 bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction *inst) {
-  Instruction* operand = hasCmpWithNull(inst);
+  Instruction *operand = GetCmpNullOperand(inst);
   if (!operand) {
     return false;
   }
 
   Instruction *malloc = path.front();
-  if (!funcInfo->HasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
+  if (!HasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
     return false;
   }
 
@@ -106,11 +83,11 @@ bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction
   ICmpInst::Predicate predicate = iCmp->getPredicate();
 
   if (br->isConditional() && br->getNumSuccessors() == 2) {
-    auto* trueBr = br->getSuccessor(0);
-    auto* falseBr = br->getSuccessor(1);
-    Instruction* next = *(++it);
+    auto *trueBr = br->getSuccessor(0);
+    auto *falseBr = br->getSuccessor(1);
+    Instruction *next = *(++it);
     if ((predicate == CmpInst::ICMP_EQ && next->getParent() == trueBr) ||
-      (predicate == CmpInst::ICMP_NE && next->getParent() == falseBr)) {
+        (predicate == CmpInst::ICMP_NE && next->getParent() == falseBr)) {
       return true;
     }
   }
@@ -119,12 +96,13 @@ bool MLChecker::IsNullMallocedInst(std::vector<Instruction *> &path, Instruction
 
 std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vector<Instruction *> &path) {
   Instruction *malloc = path[0];
+  FuncInfo *funcInfo = funcInfos[malloc->getFunction()].get();
 
   bool mallocWithOffset = funcInfo->mallocedObjs[malloc]->isMallocedWithOffset();
   bool foundMallocFreePath = false;
 
   for (Instruction *inst : path) {
-    if (inst->getOpcode() == Instruction::Call && IsCallWithName(inst, CallInstruction::Free)) {
+    if (IsCallWithName(inst, CallInstruction::Free)) {
       if ((mallocWithOffset && hasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), inst))
           || (hasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), inst))) {
         foundMallocFreePath = true;
@@ -153,36 +131,22 @@ std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vecto
   return {};
 }
 
-void MLChecker::ProcessTermInstOfPath(std::vector<Instruction *> &path) {
-  Instruction *lastInst = path.back();
-  if (lastInst->getOpcode() != Instruction::Ret) {
-    return;
-  }
-  BasicBlock *termBB = lastInst->getParent();
-  if (termBB->getInstList().size() != 2) {
-    return;
-  }
-  Instruction *firstInst = &termBB->getInstList().front();
-  if (firstInst->getOpcode() != Instruction::Load) {
-    return;
-  }
-  path.pop_back();
-  path.pop_back();
-}
+std::pair<Instruction *, Instruction *> MLChecker::Check(Function *function) {
 
-std::pair<Instruction *, Instruction *> MLChecker::Check() {
-  auto mallocCalls = funcInfo->getCalls(CallInstruction::Malloc);
+  auto mallocCalls = FindAllMallocCalls(function);
   if (mallocCalls.empty()) {
     return {};
   }
 
   for (Instruction *malloc : mallocCalls) {
-    funcInfo->CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
+    FuncInfo *funcInfo = funcInfos[malloc->getFunction()].get();
+    CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
   }
 
   for (auto &path : allMallocRetPaths) {
     ProcessTermInstOfPath(path);
   }
+
 //  errs() << "NUM of PATHs" << allMallocRetPaths.size() << "\n";
 //  for (const auto &path : allMallocRetPaths) {
 //    for (auto &inst : path) {
@@ -199,6 +163,12 @@ std::pair<Instruction *, Instruction *> MLChecker::Check() {
   }
 
   return {};
+}
+
+std::vector<Instruction *> MLChecker::FindAllMallocCalls(Function *function) {
+  return CollectAllInstsWithType(function, [](Instruction *inst) {
+    return IsCallWithName(inst, CallInstruction::Malloc);
+  });
 }
 
 } // namespace llvm

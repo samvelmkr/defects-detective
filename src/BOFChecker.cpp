@@ -2,10 +2,10 @@
 
 namespace llvm {
 
-BOFChecker::BOFChecker(const std::unordered_map<Function *, std::shared_ptr<llvm::FuncAnalyzer>> &funcInfos)
-    : funcAnalysis(funcInfos) {}
+BOFChecker::BOFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos)
+    : Checker(funcInfos) {}
 
-unsigned int BOFChecker::GetFormatStringSize(GlobalVariable *var) {
+size_t BOFChecker::GetFormatStringSize(GlobalVariable *var) {
   if (Constant *formatStringConst = var->getInitializer()) {
     if (auto *formatArray = dyn_cast<ConstantDataArray>(formatStringConst)) {
       StringRef formatString = formatArray->getAsString();
@@ -18,7 +18,7 @@ unsigned int BOFChecker::GetFormatStringSize(GlobalVariable *var) {
           if (c && !isdigit(c)) {
             return 0;
           } else {
-            unsigned int res;
+            size_t res;
             ss >> res;
             return res;
           }
@@ -30,16 +30,8 @@ unsigned int BOFChecker::GetFormatStringSize(GlobalVariable *var) {
   return 0;
 }
 
-unsigned int BOFChecker::GetArraySize(AllocaInst *pointerArray) {
-  Type *basePointerType = pointerArray->getAllocatedType();
-  if (auto *arrType = dyn_cast<ArrayType>(basePointerType)) {
-    return arrType->getNumElements();
-  }
-  return 0;
-}
-
 std::pair<Instruction *, Instruction *> BOFChecker::ScanfValidation(Function *function) {
-  FuncAnalyzer *funcInfo = funcAnalysis[function].get();
+  FuncInfo *funcInfo = funcInfos[function].get();
   auto scanfCalls = funcInfo->getCalls(CallInstruction::Scanf);
   if (scanfCalls.empty()) {
     return {};
@@ -58,7 +50,7 @@ std::pair<Instruction *, Instruction *> BOFChecker::ScanfValidation(Function *fu
     }
 
     if (auto *formatStringGV = dyn_cast<GlobalVariable>(formatStringArg->stripPointerCasts())) {
-      unsigned formatStringSize = GetFormatStringSize(formatStringGV);
+      size_t formatStringSize = GetFormatStringSize(formatStringGV);
       if (!formatStringSize) {
         return {basePointerArr, inst};
       }
@@ -72,108 +64,27 @@ std::pair<Instruction *, Instruction *> BOFChecker::ScanfValidation(Function *fu
   return {};
 }
 
-void BOFChecker::SetLoopScope(Function *function) {
-  BasicBlock *header = li->GetHeader();
-  Instruction *latch = li->GetLatch();
 
-  std::vector<BasicBlock *> scope;
-  bool startLoopScope = false;
-  BasicBlock *endLoop = latch->getParent();
-  for (auto &bb : *function) {
-    if (&bb == header) {
-      startLoopScope = true;
-    }
-    if (!startLoopScope) {
-      continue;
-    }
-    scope.push_back(&bb);
-    if (&bb == endLoop) {
-      break;
-    }
-  }
-
-  li->SetScope(scope);
-}
 
 void BOFChecker::SetLoopHeaderInfo() {
-  Instruction *condition = li->GetCondition();
+  Instruction *condition = loopInfo->GetCondition();
   auto *opInst1 = dyn_cast<Instruction>(condition->getOperand(0));
-  Instruction *loopVar;
-
-  FuncAnalyzer *funcInfo = funcAnalysis[opInst1->getFunction()].get();
-  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                opInst1,
-                [&loopVar](Instruction *curr) {
-                  if (curr->getOpcode() == Instruction::Alloca) {
-                    loopVar = curr;
-                    return true;
-                  }
-                  return false;
-                });
-
-  li->SetLoopVar(loopVar);
+  Instruction *loopVar = GetDeclaration(opInst1);
+  loopInfo->SetLoopVar(loopVar);
 
   auto *opInst2 = dyn_cast<Instruction>(condition->getOperand(1));
-  Instruction *loopSize;
-  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                opInst2,
-                [&loopSize](Instruction *curr) {
-                  if (curr->getOpcode() == Instruction::Alloca) {
-                    loopSize = curr;
-                    return true;
-                  }
-                  return false;
-                });
+  Instruction *loopSize = GetDeclaration(opInst2);
 
   std::pair<int64_t, int64_t> range = {variableValues[loopVar->getName().str()][0],
                                        variableValues[loopSize->getName().str()][0]};
 
   // validate only ICMP_SLT and ICMP_SLE
-  auto predicate = li->GetPredicate();
+  auto predicate = loopInfo->GetPredicate();
   if (predicate == CmpInst::ICMP_SLT) {
     --range.second;
   }
 
-  li->SetRange(range);
-}
-
-void BOFChecker::LoopDetection(Function *function) {
-  FuncAnalyzer *funcInfo = funcAnalysis[function].get();
-
-  Instruction *start = &*function->getEntryBlock().begin();
-
-  //Todo: store vector of Instructions if there are more than one loop
-  Instruction *latch;
-
-  funcInfo->DFS(AnalyzerMap::ForwardFlowMap,
-                start,
-                [](Instruction *curr) {
-                  // termination condition
-                  return false;
-                },
-                nullptr, // continue condition
-                [&latch](Instruction *inst) {
-                  // loop info
-                  latch = inst;
-                  // Todo: validate also latch/exit (conditional br: one edge - exit, other - backEdge)
-                  return true;
-                });
-
-  if (!latch) {
-    return;
-  }
-
-  if (latch->getOpcode() != Instruction::Br) {
-    return;
-  }
-  auto *brInst = dyn_cast<BranchInst>(latch);
-  if (!brInst->isUnconditional()) {
-    return;
-  }
-
-  BasicBlock *header = brInst->getSuccessor(0);
-  li = std::make_unique<LoopsInfo>(header, latch);
-  SetLoopScope(function);
+  loopInfo->SetRange(range);
 }
 
 size_t BOFChecker::GetMallocedSize(Instruction *malloc) {
@@ -182,19 +93,7 @@ size_t BOFChecker::GetMallocedSize(Instruction *malloc) {
     return static_cast<size_t>(size);
   }
   auto *opInst = dyn_cast<Instruction>(malloc->getOperand(0));
-
-  Instruction *sizeInst;
-  FuncAnalyzer *funcInfo = funcAnalysis[malloc->getFunction()].get();
-  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                opInst,
-                [&sizeInst](Instruction *curr) {
-                  if (curr->getOpcode() == Instruction::Load ||
-                      curr->getOpcode() == Instruction::Alloca) {
-                    sizeInst = curr;
-                    return true;
-                  }
-                  return false;
-                });
+  Instruction *sizeInst  = GetDeclaration(opInst);
 
   if (variableValues.find(sizeInst->getName().str()) == variableValues.end()) {
     llvm::report_fatal_error("Cannot find malloc size");
@@ -213,21 +112,8 @@ size_t BOFChecker::GetGepOffset(GetElementPtrInst *gep) {
     return static_cast<size_t>(offset);
   }
 
-  FuncAnalyzer *funcInfo = funcAnalysis[gep->getFunction()].get();
   auto *opInst = dyn_cast<Instruction>(gep->getOperand(1));
-
-  Instruction *offsetInst;
-
-  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                opInst,
-                [&offsetInst](Instruction *curr) {
-                  if (curr->getOpcode() == Instruction::Load ||
-                      curr->getOpcode() == Instruction::Alloca) {
-                    offsetInst = curr;
-                    return true;
-                  }
-                  return false;
-                });
+  Instruction *offsetInst = GetDeclaration(opInst);
 
   if (variableValues.find(offsetInst->getName().str()) == variableValues.end()) {
     llvm::report_fatal_error("Cannot find offset");
@@ -261,12 +147,12 @@ std::string BOFChecker::GetGepVarName(GetElementPtrInst *gep) {
   return allocaInst->getName().str();
 }
 
-std::string BOFChecker::GetArgName(Argument* arg) {
+std::string BOFChecker::GetArgName(Argument *arg) {
   std::string funcName = arg->getParent()->getName().str();
   return funcName + "." + arg->getName().str();
 }
 
-void BOFChecker::StoreConstant(StoreInst* storeInst) {
+void BOFChecker::StoreConstant(StoreInst *storeInst) {
   Value *storedValue = storeInst->getValueOperand();
   auto *constValue = dyn_cast<ConstantInt>(storedValue);
   auto *pointerOp = storeInst->getPointerOperand();
@@ -282,16 +168,15 @@ void BOFChecker::StoreConstant(StoreInst* storeInst) {
 void BOFChecker::StoreInstruction(llvm::StoreInst *storeInst) {
   auto *storedValue = storeInst->getValueOperand();
   auto *pointerOp = storeInst->getPointerOperand();
-  if (auto* arg = dyn_cast<Argument>(storedValue)) {
+  if (auto *arg = dyn_cast<Argument>(storedValue)) {
     variableValues[pointerOp->getName().str()] = variableValues[GetArgName(arg)];
-  }
-  else if (isa<AllocaInst>(storedValue) || isa<LoadInst>(storedValue)) {
+  } else if (isa<AllocaInst>(storedValue) || isa<LoadInst>(storedValue)) {
     variableValues[pointerOp->getName().str()] = variableValues[storedValue->getName().str()];
   }
 }
 
 void BOFChecker::ValueAnalysis(Instruction *inst) {
-  if (li && inst == &*(li->GetHeader()->begin())) {
+  if (loopInfo && inst == &*(loopInfo->GetHeader()->begin())) {
     SetLoopHeaderInfo();
   }
 
@@ -339,13 +224,13 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
 
   } else if (inst->getOpcode() == Instruction::Call) {
     auto *call = dyn_cast<CallInst>(inst);
-    Function* calledFunc = call->getCalledFunction();
+    Function *calledFunc = call->getCalledFunction();
     if (calledFunc->isDeclarationForLinker()) {
       return;
     }
 
     size_t argNum = 0;
-    for (Argument& arg : calledFunc->args()) {
+    for (Argument &arg : calledFunc->args()) {
       if (arg.getType()->isPointerTy()) {
         errs() << arg << arg.getName() << "\n";
         arg.setName(std::to_string(argNum));
@@ -357,33 +242,6 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
 
   }
 
-}
-
-std::vector<Instruction *> BOFChecker::CollectMemcpyInst(Instruction *malloc) {
-  FuncAnalyzer *funcInfo = funcAnalysis[malloc->getFunction()].get();
-  std::unique_ptr<CallDataDepInfo> callInfo = std::make_unique<CallDataDepInfo>();
-
-  std::vector<Instruction *> memcpies = funcInfo->CollectAllDepInst(malloc, [](Instruction *curr) {
-    return IsCallWithName(curr, CallInstruction::Memcpy);
-  }, callInfo.get());
-
-  if (callInfo) {
-    Function *calledFunc = callInfo->call->getCalledFunction();;
-    auto *arg = calledFunc->getArg(callInfo->argNum);
-    FuncAnalyzer *calledFuncInfo = funcAnalysis[calledFunc].get();
-    std::vector<Instruction *> memcpiesFromCalledFunc =
-        calledFuncInfo->CollectSpecialDependenciesOnArg(arg,
-                                                        callInfo->argNum,
-                                                        [](Instruction *curr) {
-                                                          return IsCallWithName(
-                                                              curr,
-                                                              CallInstruction::Memcpy);
-                                                        });
-    if (!memcpiesFromCalledFunc.empty()) {
-      memcpies.insert(memcpies.end(), memcpiesFromCalledFunc.begin(), memcpiesFromCalledFunc.end());
-    }
-  }
-  return memcpies;
 }
 
 bool BOFChecker::AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t mallocSize) {
@@ -445,29 +303,11 @@ Instruction *BOFChecker::FindBOFInst(Instruction *inst, size_t mallocSize,
   return nullptr;
 }
 
-// Todo: rename func
 // Fixme: Validate multiple malloc with one cycle
-Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj) {
+Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
   Instruction *malloc = obj->getMallocCall();
   Function *function = malloc->getFunction();
-  FuncAnalyzer *funcInfo = funcAnalysis[function].get();
-
-  std::vector<std::unique_ptr<CallDataDepInfo>> externalCalls;
-  Instruction *previous = nullptr;
-  funcInfo->DFS(AnalyzerMap::ForwardDependencyMap,
-                malloc,
-                [&previous, &externalCalls](Instruction *curr) {
-                  if (auto *cInst = dyn_cast<CallInst>(curr)) {
-                    if (!cInst->getCalledFunction()->isDeclarationForLinker() &&
-                        !IsCallWithName(dyn_cast<Instruction>(cInst), CallInstruction::Memcpy)) {
-                      std::unique_ptr<CallDataDepInfo> callInfo = std::make_unique<CallDataDepInfo>();
-                      callInfo->Init(cInst, previous);
-                      externalCalls.push_back(std::move(callInfo));
-                    }
-                  }
-                  previous = curr;
-                  return false;
-                });
+  FuncInfo *funcInfo = funcInfos[function].get();
 
   std::vector<Instruction *> frees = obj->getFreeCalls();
   Instruction *start = &*function->getEntryBlock().begin();
@@ -475,65 +315,42 @@ Instruction *BOFChecker::ProcessMalloc(MallocedObject *obj) {
   size_t mallocSize = 0;
 
   std::vector<Instruction *> geps = funcInfo->CollectAllGeps(malloc);
-  std::vector<Instruction *> memcpies = CollectMemcpyInst(malloc);
+  std::vector<Instruction *> memcpies = CollectAllInstsWithType(function, [](Instruction *inst) {
+    return IsCallWithName(inst, CallInstruction::Memcpy);
+  });
 
   LoopDetection(function);
 
-  funcInfo->DFS(AnalyzerMap::ForwardFlowMap,
-                start,
-                [malloc, frees, &mallocSize, &bofInst, &geps, &memcpies, this](Instruction *curr) {
-                  if (IsCallWithName(curr, CallInstruction::Free) &&
-                      std::find(frees.begin(), frees.end(), curr) != frees.end()) {
-                    return true;
-                  }
+  DFSOptions options;
+  options.terminationCondition = [malloc, frees, &mallocSize, &bofInst,
+                                  &geps, &memcpies, this](Instruction *curr) {
+    if (IsCallWithName(curr, CallInstruction::Free) &&
+        std::find(frees.begin(), frees.end(), curr) != frees.end()) {
+      return true;
+    }
 
-                  errs() << "inst:" << *curr << "\n";
-                  ValueAnalysis(curr);
-                  errs() << "inst:" << *curr << "\n";
-                  printVA();
-                  errs() << "\n";
-                  if (curr == malloc) {
-                    mallocSize = GetMallocedSize(malloc);
-                  }
+    errs() << "inst:" << *curr << "\n";
+    ValueAnalysis(curr);
+    errs() << "inst:" << *curr << "\n";
+    printVA();
+    errs() << "\n";
+    if (curr == malloc) {
+      mallocSize = GetMallocedSize(malloc);
+    }
 
-                  bofInst = FindBOFInst(curr, mallocSize, geps, memcpies);
-                  if (bofInst) {
-                    return true;
-                  }
-                  return false;
-                });
+    bofInst = FindBOFInst(curr, mallocSize, geps, memcpies);
+    if (bofInst) {
+      return true;
+    }
+    return false;
+  };
+
+  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSResult result = DFS(context);
 
   errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
 //  funcInfo->printMap(AnalyzerMap::ForwardDependencyMap);
 //  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
-
-  if (!externalCalls.empty()) {
-    for (auto &callInfo : externalCalls) {
-      Function *calledFunc = callInfo->call->getCalledFunction();
-      Instruction *startInst = &*calledFunc->getEntryBlock().begin();
-
-      FuncAnalyzer *calledFuncInfo = funcAnalysis[calledFunc].get();
-      calledFuncInfo->DFS(AnalyzerMap::ForwardFlowMap,
-                          startInst,
-                          [frees, &mallocSize, &bofInst, &geps, &memcpies, this](Instruction *curr) {
-                            if (IsCallWithName(curr, CallInstruction::Free) &&
-                                std::find(frees.begin(), frees.end(), curr) != frees.end()) {
-                              return true;
-                            }
-
-                            errs() << "inst:" << *curr << "\n";
-                            ValueAnalysis(curr);
-                            errs() << "inst:" << *curr << "\n";
-                            printVA();
-                            errs() << "\n";
-                            bofInst = FindBOFInst(curr, mallocSize, geps, memcpies);
-                            if (bofInst) {
-                              return true;
-                            }
-                            return false;
-                          });
-    }
-  }
 
   ClearData();
   return bofInst;
@@ -545,12 +362,12 @@ void BOFChecker::ClearData() {
 }
 
 std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *function) {
-  FuncAnalyzer *funcInfo = funcAnalysis[function].get();
+  FuncInfo *funcInfo = funcInfos[function].get();
   for (auto &obj : funcInfo->mallocedObjs) {
 //    if (geps.empty()) {
 //      continue;
 //    }
-    if (auto *bofInst = ProcessMalloc(obj.second.get())) {
+    if (auto *bofInst = DetectOutOfBoundAccess(obj.second.get())) {
       return {obj.first, bofInst};
     }
 
@@ -560,32 +377,33 @@ std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Func
   return {};
 }
 
-
-
 bool BOFChecker::IsCorrectMemcpy2(Instruction *inst) {
   auto *mcInst = dyn_cast<MemCpyInst>(inst);
 //  Value *dest = mcInst->getDest();
   Value *src = mcInst->getSource();
   Value *size = mcInst->getLength();
 
-  Instruction* sizeInst;
-  FuncAnalyzer* funcInfo = funcAnalysis[inst->getFunction()].get();
+  Instruction *sizeInst;
+  FuncAnalyzer *funcInfo = funcAnalysis[inst->getFunction()].get();
   bool offsetAccess = false;
   size_t offset = 0;
   funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
                 dyn_cast<Instruction>(size),
-                [&sizeInst, &offsetAccess, &offset, this] (Instruction* curr) {
-    if (auto* gep = dyn_cast<GetElementPtrInst>(curr)) {
-      CalculateGepOffset(gep);
-    }
-    if (curr->getOpcode() == Instruction::Alloca) {
-      sizeInst = curr;
-      return true;
-    }
-    return false;
-  });
+                [&sizeInst, &offsetAccess, &offset, this](Instruction *curr) {
+                  if (auto *gep = dyn_cast<GetElementPtrInst>(curr)) {
+                    offsetAccess = true;
+                    offset = CalculateGepOffset(gep);
+                  }
+                  if (curr->getOpcode() == Instruction::Alloca) {
+                    sizeInst = curr;
+                    return true;
+                  }
+                  return false;
+                });
 
+  if (offsetAccess) {
 
+  }
 
   errs() << "Found llvm.memcpy call:\n";
   errs() << "  Destination: " << *mcInst->getDest() << "\n";
@@ -619,7 +437,7 @@ bool BOFChecker::IsCorrectMemcpy(Instruction *mcInst) {
 
 Instruction *BOFChecker::FindStrlenUsage(Instruction *alloca) {
   Function *function = alloca->getFunction();
-  FuncAnalyzer *funcInfo = funcAnalysis[function].get();
+  FuncInfo *funcInfo = funcInfos[function].get();
   Instruction *prev;
   std::unique_ptr<CallDataDepInfo> callInfo = std::make_unique<CallDataDepInfo>();
   Instruction *strlenCall;
@@ -658,20 +476,7 @@ Instruction *BOFChecker::FindStrlenUsage(Instruction *alloca) {
 }
 
 Instruction *BOFChecker::FindBOFAfterWrongMemcpy(Instruction *mcInst) {
-  Function *function = mcInst->getFunction();
-  FuncAnalyzer *funcInfo = funcAnalysis[function].get();
-  Instruction *alloca;
-
-  funcInfo->DFS(AnalyzerMap::BackwardDependencyMap,
-                mcInst,
-                [&alloca](Instruction *curr) {
-                  if (curr->getOpcode() == Instruction::Alloca) {
-                    alloca = curr;
-                    return true;
-                  }
-                  return false;
-                });
-
+  Instruction *alloca = GetDeclaration(mcInst);
   Instruction *bofInst = FindStrlenUsage(alloca);
   return bofInst;
 }
@@ -703,10 +508,7 @@ std::pair<Instruction *, Instruction *> BOFChecker::Check(Function *function) {
   if (outOfBoundAcc.first && outOfBoundAcc.second) {
     return outOfBoundAcc;
   }
-//  auto mcBOF = MemcpyValidation(function);
-//  if (mcBOF.first && mcBOF.second) {
-//    return mcBOF;
-//  }
+
   return {};
 }
 

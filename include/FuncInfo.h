@@ -1,5 +1,5 @@
-#ifndef ANALYZER_SRC_FUNCANALYZER_H
-#define ANALYZER_SRC_FUNCANALYZER_H
+#ifndef ANALYZER_SRC_FUNCINFO_H
+#define ANALYZER_SRC_FUNCINFO_H
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
@@ -42,6 +42,10 @@ struct CallInstruction {
   static const std::string Scanf;
   static const std::string Memcpy;
   static const std::string Strlen;
+  static const std::string Time;
+  static const std::string Srand;
+  static const std::string Rand;
+
 };
 
 class CallDataDepInfo {
@@ -74,30 +78,28 @@ enum AnalyzerMap {
   BackwardFlowMap
 };
 
+
 int64_t CalculateOffset(GetElementPtrInst *inst);
+Instruction* GetCmpNullOperand(Instruction *icmp);
 
-
-class FuncAnalyzer {
+class FuncInfo {
 private:
   Function *function = {};
   Instruction *ret = {};
 
   std::unordered_map<std::string, std::vector<Instruction *>> callInstructions;
 
-  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> forwardDependencyMap;
-  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> backwardDependencyMap;
-  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> forwardFlowMap;
-  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> backwardFlowMap;
+  std::unordered_map<Value *, std::unordered_set<Value *>> forwardDependencyMap;
+  std::unordered_map<Value *, std::unordered_set<Value *>> backwardDependencyMap;
+  std::unordered_map<Value *, std::unordered_set<Value *>> forwardFlowMap;
+  std::unordered_map<Value *, std::unordered_set<Value *>> backwardFlowMap;
 
-  std::unordered_map<Argument *, Instruction *> argumentsMap;
 
   void CollectCalls(Instruction *callInst);
 
-  std::unordered_map<Instruction *, std::unordered_set<Instruction *>> *SelectMap(AnalyzerMap mapID);
-
-  void AddEdge(AnalyzerMap mapID, Instruction *source, Instruction *destination);
-  void RemoveEdge(AnalyzerMap mapID, Instruction *source, Instruction *destination);
-  bool HasEdge(AnalyzerMap mapID, Instruction *source, Instruction *destination);
+  void AddEdge(AnalyzerMap mapID, Value *source, Value *destination);
+  void RemoveEdge(AnalyzerMap mapID, Value *source, Value *destination);
+  bool HasEdge(AnalyzerMap mapID, Value *source, Value *destination);
 
   bool ProcessStoreInsts(Instruction *storeInst);
   bool ProcessGepInsts(Instruction *gepInst);
@@ -109,33 +111,31 @@ private:
   void CreateEdgesInBB(BasicBlock *bb);
   void ConstructFlowDeps();
 
-  void FindPaths(std::unordered_set<Instruction *> &visitedInsts,
-                 std::vector<std::vector<Instruction *>> &paths,
-                 std::vector<Instruction *> &currentPath,
-                 Instruction *from,
-                 Instruction *to);
-
-  void ProcessArgs();
-public:
-  FuncAnalyzer() {}
-  FuncAnalyzer(Function *func);
-
-  MallocedObject *FindSuitableObj(Instruction *base);
-
   bool DFS(AnalyzerMap mapID,
            Instruction *start,
            const std::function<bool(Instruction *)> &terminationCondition,
            const std::function<bool(Instruction *)> &continueCondition = nullptr,
            const std::function<void(Instruction *)> &getLoopInfo = nullptr);
 
+  void ProcessArgs();
+public:
+  FuncInfo() = default;
+  FuncInfo(Function *func);
+
+  std::unordered_map<Value *, std::unordered_set<Value *>> *SelectMap(AnalyzerMap mapID);
+
+  MallocedObject *FindSuitableObj(Instruction *base);
+
+
+
   void printMap(AnalyzerMap mapID);
   std::vector<Instruction *> getCalls(const std::string &funcName);
   Instruction *getRet() const;
 
-  void CollectPaths(Instruction *from, Instruction *to,
-                    std::vector<std::vector<Instruction *>> &allPaths);
+//  void CollectPaths(Instruction *from, Instruction *to,
+//                    std::vector<std::vector<Instruction *>> &allPaths);
 
-  bool HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
+//  bool HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
 
   bool FindSpecialDependenceOnArg(Argument *arg, size_t argNum,
                                   const std::function<bool(Instruction *)> &type);
@@ -158,4 +158,4 @@ public:
 
 } // namespace llvm
 
-#endif //ANALYZER_SRC_FUNCANALYZER_H
+#endif // ANALYZER_SRC_FUNCINFO_H
