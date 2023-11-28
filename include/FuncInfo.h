@@ -19,7 +19,7 @@ private:
   Instruction *latch;
   std::vector<BasicBlock *> scope;
   Instruction *loopVariableInst = nullptr;
-  Instruction *loopSizeInst = nullptr;
+  Value *loopSize = nullptr;
 
   std::pair<int64_t, int64_t> range = {};
 
@@ -55,8 +55,8 @@ public:
   void SetLoopVar(Instruction *inst) {
     loopVariableInst = inst;
   }
-  void SetLoopSize(Instruction *inst) {
-    loopSizeInst = inst;
+  void SetLoopSize(Value *val) {
+    loopSize = val;
   }
   void SetRange(std::pair<int64_t, int64_t> pair) {
     range = pair;
@@ -76,8 +76,8 @@ public:
   Instruction *GetLoopVar() {
     return loopVariableInst;
   }
-  Instruction *GetLoopSize() {
-    return loopSizeInst;
+  Value *GetLoopSize() {
+    return loopSize;
   }
   ICmpInst::Predicate GetPredicate() {
     return predicate;
@@ -117,6 +117,7 @@ struct CallInstruction {
   static const std::string Srand;
   static const std::string Rand;
   static const std::string Printf;
+  static const std::string Snprintf;
 };
 
 class CallDataDepInfo {

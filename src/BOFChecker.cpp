@@ -72,18 +72,32 @@ void BOFChecker::SetLoopHeaderInfo(Function *function) {
   }
 
   Instruction *loopVar = loopInfo->GetLoopVar();
-  Instruction *loopSize = loopInfo->GetLoopSize();
+  Value *loopSize = loopInfo->GetLoopSize();
 
-  if (!loopVar->hasName() || !loopSize->hasName()) {
-    return;
+  if (isa<ConstantInt>(loopSize)) {
+    if (!loopVar->hasName() ||
+        variableValues.find(loopVar->getName().str()) == variableValues.end()) {
+      return;
+    }
+  } else {
+    if (!loopVar->hasName() || !loopSize->hasName()) {
+      return;
+    }
+
+    if (variableValues.find(loopVar->getName().str()) == variableValues.end() ||
+        variableValues.find(loopSize->getName().str()) == variableValues.end()) {
+      return;
+    }
   }
 
-  if (variableValues.find(loopVar->getName().str()) == variableValues.end() ||
-      variableValues.find(loopSize->getName().str()) == variableValues.end()) {
-    return;
+  int64_t from = variableValues[loopVar->getName().str()][0];
+  int64_t to = 0;
+  if (auto* constInst = dyn_cast<ConstantInt>(loopSize)) {
+    to = constInst->getSExtValue();
+  } else {
+    to = variableValues[loopSize->getName().str()][0];
   }
-  std::pair<int64_t, int64_t> range = {variableValues[loopVar->getName().str()][0],
-                                       variableValues[loopSize->getName().str()][0]};
+  std::pair<int64_t, int64_t> range = {from, to};
 
   funcInfo->SetLoopRange(range);
 }
@@ -148,8 +162,9 @@ void BOFChecker::StoreConstant(StoreInst *storeInst) {
   auto *pointerOp = storeInst->getPointerOperand();
   if (auto *gep = dyn_cast<GetElementPtrInst>(pointerOp)) {
     variableValues[GetGepVarName(gep)][GetGepOffset(gep)] = constValue->getSExtValue();
-  } else {
-    std::string operandName = storeInst->getPointerOperand()->getName().str();
+
+  } else if (isa<Instruction>(pointerOp)) {
+    std::string operandName = pointerOp->getName().str();
     variableValues[operandName][0] = constValue->getSExtValue();
   }
 }
@@ -233,42 +248,42 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
       return;
     }
 
+    errs() << "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5\n";
+    for (Argument &arg : calledFunc->args()) {
+      errs() << arg << "\n";
+    }
+    errs() << "---------------------------------------------\n";
+    for (auto &arg : call->operands()) {
+      errs() << *arg << "\n";
+    }
+    errs() << "---------------------------------------------\n";
+
     size_t argNum = 0;
     for (Argument &arg : calledFunc->args()) {
-      if (arg.getType()->isPointerTy()) {
-//        errs() << arg << arg.getName() << "\n";
+      errs() << "arg " << arg << "\n";
+
+      if (auto* constInst = dyn_cast<ConstantInt>(call->getOperand(argNum))) {
         arg.setName(std::to_string(argNum));
-        variableValues[GetArgName(&arg)] = variableValues[call->getArgOperand(argNum)->getName().str()];
-        return;
+        errs() << "---\n";
+        errs() << arg << " name:" << GetArgName(&arg) << "\n";
+        errs() << arg << arg.getName() << "\n";
+        errs() << "---\n";
+        variableValues[GetArgName(&arg)].resize(1, 0);
+        variableValues[GetArgName(&arg)][0] = constInst->getSExtValue();
       }
+      if (arg.getType()->isPointerTy()) {
+        arg.setName(std::to_string(argNum));
+        errs() << arg << arg.getName() << "\n";
+        variableValues[GetArgName(&arg)] = variableValues[call->getArgOperand(argNum)->getName().str()];
+      }
+
+
+
       argNum++;
     }
+    errs() << "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5\n";
 
   }
-//  else if (auto *iCmp = dyn_cast<ICmpInst>(inst)) {
-//    ICmpInst::Predicate predicate = iCmp->getPredicate();
-//    if (predicate == CmpInst::ICMP_SGT &&
-//        ) {
-//
-//    }
-//    auto *call = dyn_cast<CallInst>(inst);
-//    Function *calledFunc = call->getCalledFunction();
-//    if (calledFunc->isDeclarationForLinker()) {
-//      return;
-//    }
-//
-//    size_t argNum = 0;
-//    for (Argument &arg : calledFunc->args()) {
-//      if (arg.getType()->isPointerTy()) {
-//        errs() << arg << arg.getName() << "\n";
-//        arg.setName(std::to_string(argNum));
-//        variableValues[GetArgName(&arg)] = variableValues[call->getArgOperand(argNum)->getName().str()];
-//        return;
-//      }
-//      argNum++;
-//    }
-//
-//  }
 
 }
 
@@ -316,8 +331,14 @@ Instruction *BOFChecker::FindBOFInst(Instruction *inst, size_t mallocSize,
   if (IsCallWithName(inst, CallInstruction::Memcpy) &&
       std::find(memcpies.begin(), memcpies.end(), inst) != memcpies.end()) {
     if (Instruction *bofInst = MemcpyValidation(inst)) {
-//      errs() << "ssss" << *bofInst << "\n";
       return bofInst;
+    }
+  }
+
+  if (IsCallWithName(inst, CallInstruction::Snprintf)) {
+    if (!ValidSnprintfCall(inst)) {
+      errs() << "ssss" << *inst << "\n";
+      return inst;
     }
   }
   return nullptr;
@@ -357,11 +378,11 @@ Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
       return true;
     }
 
-//    errs() << "inst:" << *currInst << "\n";
+    errs() << "inst:" << *currInst << "\n";
     ValueAnalysis(currInst);
-//    errs() << "inst:" << *currInst << "\n";
-//    printVA();
-//    errs() << "\n";
+    errs() << "inst:" << *currInst << "\n";
+    printVA();
+    errs() << "\n";
     if (currInst == malloc) {
       mallocSize = GetMallocedSize(malloc);
     }
@@ -377,7 +398,7 @@ Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
   DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
   DFSResult result = DFS(context);
 
-//  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
+  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
 //  funcInfo->printMap(AnalyzerMap::ForwardDependencyMap);
 //  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
 
@@ -396,7 +417,7 @@ std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Func
 //    if (geps.empty()) {
 //      continue;
 //    }
-
+    errs() << "PPPPPPP\n";
     if (auto *bofInst = DetectOutOfBoundAccess(obj.second.get())) {
       return {obj.first, bofInst};
     }
@@ -444,6 +465,31 @@ Instruction *BOFChecker::MemcpyValidation(Instruction *mcInst) {
   return nullptr;
 }
 
+bool BOFChecker::ValidSnprintfCall(Instruction* inst) {
+  auto* call = dyn_cast<CallInst>(inst);
+  Value* bufVal = call->getOperand(0);
+  Value* sizeVal = call->getOperand(1);
+  errs() << "\tbuf: " << *bufVal << "\n";
+  errs() << *bufVal->stripPointerCasts() << "\n";
+  Type *bufVarType = bufVal->getType()->getPointerElementType();
+  if (isa<ArrayType>(bufVarType)) {
+    uint64_t bufSize = dyn_cast<ArrayType>(bufVarType)->getNumElements();
+    errs() << "^^^^" <<  bufSize << "\n";
+  }
+//  if (auto *globalVar = dyn_cast<GlobalVariable>(bufVal)) {
+//
+//  }
+  if (auto* sizeInst = dyn_cast<Instruction>(sizeVal)) {
+    if (variableValues.find(sizeInst->getName().str()) == variableValues.end()) {
+      return true;
+    }
+    errs() << "\tsize: " << sizeInst << " = " << variableValues[sizeInst->getName().str()][0] << "\n";
+  }
+
+  return false;
+}
+
+
 Instruction *BOFChecker::FindBOFAfterWrongMemcpy(Instruction *mcInst) {
   Instruction *alloca = GetDeclaration(mcInst);
 
@@ -473,10 +519,13 @@ Instruction *BOFChecker::FindBOFAfterWrongMemcpy(Instruction *mcInst) {
 //}
 
 std::pair<Instruction *, Instruction *> BOFChecker::Check(Function *function) {
+  errs() << "PPPPPPP\n";
+
   auto scanfBOF = ScanfValidation(function);
   if (scanfBOF.first && scanfBOF.second) {
     return scanfBOF;
   }
+  errs() << "PPPPPPP\n";
 
   auto outOfBoundAcc = OutOfBoundAccessChecker(function);
   if (outOfBoundAcc.first && outOfBoundAcc.second) {

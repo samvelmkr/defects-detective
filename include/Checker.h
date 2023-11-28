@@ -30,7 +30,8 @@ private:
                                            CallInstruction::Time,
                                            CallInstruction::Srand,
                                            CallInstruction::Rand,
-                                           CallInstruction::Printf};
+                                           CallInstruction::Printf,
+                                           CallInstruction::Snprintf};
 
   bool IsLibraryFunction(Value *inst);
 protected:

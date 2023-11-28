@@ -40,6 +40,7 @@ class BOFChecker : public Checker {
   Instruction *FindBOFAfterWrongMemcpy(Instruction *mcInst);
   Instruction *FindStrlenUsage(Instruction *alloca);
 
+  bool ValidSnprintfCall(Instruction* inst);
   void printVA();
 public:
   BOFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
