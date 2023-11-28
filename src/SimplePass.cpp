@@ -1,5 +1,5 @@
 #include "SimplePass.h"
-#include "Checker.h"
+#include "Analyzer.h"
 
 std::string SimplePass::getFunctionLocation(const Function *Func) {
   for (auto InstIt = inst_begin(Func), ItEnd = inst_end(Func); InstIt != ItEnd; ++InstIt) {
@@ -90,8 +90,8 @@ void SimplePass::analyze(Module &M) {
 
   Sarif GenSarif;
 
-  auto checker = std::make_shared<Checker>(M);
-  auto mlLoc = checker->MLCheck();
+  auto analyzer = std::make_shared<Analyzer>(M);
+  auto mlLoc = analyzer->MLCheck();
   if (mlLoc) {
 //    errs() << mlLoc->getType().first << ": " << *mlLoc->getTrace().first << "|" <<  *mlLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(mlLoc->getTrace().first, mlLoc->getTrace().second);
@@ -100,7 +100,7 @@ void SimplePass::analyze(Module &M) {
     return;
   }
 
-  auto uafLoc = checker->UAFCheck();
+  auto uafLoc = analyzer->UAFCheck();
   if (uafLoc) {
 //    errs() << uafLoc->getType().first << ": " << *uafLoc->getTrace().first << "|" <<  *uafLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(uafLoc->getTrace().first, uafLoc->getTrace().second);
@@ -109,7 +109,7 @@ void SimplePass::analyze(Module &M) {
     return;
   }
 
-  auto bofLoc = checker->BOFCheck();
+  auto bofLoc = analyzer->BOFCheck();
   if (bofLoc) {
 //    errs() << bofLoc->getType().first << ": " << *bofLoc->getTrace().first << "|" <<  *bofLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(bofLoc->getTrace().first, bofLoc->getTrace().second);
@@ -117,7 +117,7 @@ void SimplePass::analyze(Module &M) {
     GenSarif.save();
     return;
   }
-  
+
   GenSarif.save();
 }
 

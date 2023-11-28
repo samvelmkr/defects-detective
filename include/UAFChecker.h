@@ -1,20 +1,18 @@
 #ifndef ANALYZER_SRC_UAFCHECKER_H
 #define ANALYZER_SRC_UAFCHECKER_H
 
-#include "FuncAnalyzer.h"
+#include "Checker.h"
 
 namespace llvm {
 
-class UAFChecker {
-  Function* function;
-  FuncAnalyzer* funcInfo;
+class UAFChecker : public Checker {
 
   std::vector<std::vector<Instruction*>> allMallocRetPaths = {};
 
 public:
-  UAFChecker(Function* func, FuncAnalyzer* analyzer);
+  UAFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
   bool isUseAfterFree(Instruction* inst);
-  std::pair<Instruction *, Instruction *> Check();
+  std::pair<Instruction *, Instruction *> Check(Function* function) override;
 };
 
 } // namespace llvm
