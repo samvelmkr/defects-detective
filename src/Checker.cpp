@@ -94,16 +94,12 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
     for (Value *next : map->operator[](current)) {
       if (visitedNodes.find(next) == visitedNodes.end()) {
         dfsStack.push(next);
-      } else if (context.options.getLoopInfo && dfsStack) {
-        context.options.getLoopInfo(current);
       }
     }
 
   }
-  result.
-      status = false;
-  return
-      result;
+  result.status = false;
+  return result;
 }
 
 DFSResult Checker::DFS(const DFSContext &context) {
@@ -260,68 +256,6 @@ size_t Checker::GetArraySize(AllocaInst *pointerArray) {
   }
   return 0;
 }
-
-void Checker::LoopDetection(Function *function) {
-  Instruction *start = &*function->getEntryBlock().begin();
-
-  //Todo: store vector of Instructions if there are more than one loop
-  Instruction *latch;
-
-  DFSOptions options;
-  options.getLoopInfo = [&latch](Value *curr) {
-    if (!isa<Instruction>(curr)) {
-      return false;
-    }
-    auto *currInst = dyn_cast<Instruction>(curr);
-    // loop info
-    latch = currInst;
-    // Todo: validate also latch/exit (conditional br: one edge - exit, other - backEdge)
-    return true;
-  };
-
-  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
-  DFSResult result = DFS(context);
-
-  if (!latch) {
-    return;
-  }
-  errs() << "LATCH " << *latch << "\n";
-  if (latch->getOpcode() != Instruction::Br) {
-    return;
-  }
-  auto *brInst = dyn_cast<BranchInst>(latch);
-  if (!brInst->isUnconditional()) {
-    return;
-  }
-
-  BasicBlock *header = brInst->getSuccessor(0);
-  loopInfo = std::make_unique<LoopsInfo>(header, latch);
-  SetLoopScope(function);
-}
-
-void Checker::SetLoopScope(Function *function) {
-  BasicBlock *header = loopInfo->GetHeader();
-  Instruction *latch = loopInfo->GetLatch();
-
-  std::vector<BasicBlock *> scope;
-  bool startLoopScope = false;
-  BasicBlock *endLoop = latch->getParent();
-  for (auto &bb : *function) {
-    if (&bb == header) {
-      startLoopScope = true;
-    }
-    if (!startLoopScope) {
-      continue;
-    }
-    scope.push_back(&bb);
-    if (&bb == endLoop) {
-      break;
-    }
-  }
-
-  loopInfo->SetScope(scope);
-}
-
 
 //std::vector<std::vector<Instruction *>> Checker::CollectAllPaths(Instruction *start, Instruction *end) {
 //  std::vector<std::vector<Instruction *>> allPaths;

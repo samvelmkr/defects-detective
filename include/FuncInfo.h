@@ -13,6 +13,77 @@
 
 namespace llvm {
 
+class LoopsInfo {
+private:
+  BasicBlock *header;
+  Instruction *latch;
+  std::vector<BasicBlock *> scope;
+  Instruction *loopVariableInst = nullptr;
+  Instruction *loopSizeInst = nullptr;
+
+  std::pair<int64_t, int64_t> range = {};
+
+  Instruction *condition;
+  ICmpInst::Predicate predicate;
+
+  void ProcessHeader() {
+    for (auto &i : *header) {
+      if (auto *iCmp = dyn_cast<ICmpInst>(&i)) {
+        predicate = iCmp->getPredicate();
+        condition = &i;
+      }
+    }
+  }
+public:
+  LoopsInfo(BasicBlock *bb, Instruction *inst)
+      : header(bb),
+        latch(inst) {
+    ProcessHeader();
+  }
+
+  bool HasInst(Instruction *inst) {
+    for (const auto &bb : scope) {
+      if (inst->getParent() == bb) {
+        return true;
+      }
+    }
+    return false;
+  }
+  void SetScope(const std::vector<BasicBlock *> &vec) {
+    scope = vec;
+  }
+  void SetLoopVar(Instruction *inst) {
+    loopVariableInst = inst;
+  }
+  void SetLoopSize(Instruction *inst) {
+    loopSizeInst = inst;
+  }
+  void SetRange(std::pair<int64_t, int64_t> pair) {
+    range = pair;
+  }
+  std::pair<int64_t, int64_t> GetRange() {
+    return range;
+  }
+  BasicBlock *GetHeader() {
+    return header;
+  }
+  Instruction *GetLatch() {
+    return latch;
+  }
+  Instruction *GetCondition() {
+    return condition;
+  }
+  Instruction *GetLoopVar() {
+    return loopVariableInst;
+  }
+  Instruction *GetLoopSize() {
+    return loopSizeInst;
+  }
+  ICmpInst::Predicate GetPredicate() {
+    return predicate;
+  }
+};
+
 class MallocedObject {
 private:
   Instruction *base = {};
@@ -78,7 +149,7 @@ enum AnalyzerMap {
   BackwardFlowMap
 };
 
-int64_t CalculateOffset(GetElementPtrInst *inst);
+int64_t CalculateOffsetInBits(GetElementPtrInst *inst);
 Instruction *GetCmpNullOperand(Instruction *icmp);
 
 class FuncInfo {
@@ -93,12 +164,13 @@ private:
   std::unordered_map<Value *, std::unordered_set<Value *>> forwardFlowMap;
   std::unordered_map<Value *, std::unordered_set<Value *>> backwardFlowMap;
 
+  std::shared_ptr<LoopsInfo> loopInfo = {nullptr};
 
   void CollectCalls(Instruction *callInst);
 
-  void AddEdge(AnalyzerMap mapID, Value * source, Value * destination);
-  void RemoveEdge(AnalyzerMap mapID, Value * source, Value * destination);
-  bool HasEdge(AnalyzerMap mapID, Value * source, Value * destination);
+  void AddEdge(AnalyzerMap mapID, Value *source, Value *destination);
+  void RemoveEdge(AnalyzerMap mapID, Value *source, Value *destination);
+  bool HasEdge(AnalyzerMap mapID, Value *source, Value *destination);
 
   bool ProcessStoreInsts(Instruction *storeInst);
   bool ProcessGepInsts(Instruction *gepInst);
@@ -113,10 +185,18 @@ private:
   bool DFS(AnalyzerMap mapID,
            Instruction *start,
            const std::function<bool(Value *)> &terminationCondition,
-           const std::function<bool(Value *)> &continueCondition = nullptr,
-           const std::function<void(Value *)> &getLoopInfo = nullptr);
+           const std::function<bool(Value *)> &continueCondition = nullptr);
+
+  Instruction *GetDeclaration(Instruction *inst);
 
   void ProcessArgs();
+
+  bool DetectLoopsUtil(Function *f, BasicBlock *BB, std::unordered_set<BasicBlock *> &visited,
+                       std::unordered_set<BasicBlock *> &recStack);
+
+  void DetectLoops();
+  void SetLoopHeaderInfo();
+  void SetLoopScope();
 public:
   FuncInfo() = default;
   FuncInfo(Function *func);
@@ -128,6 +208,10 @@ public:
   void printMap(AnalyzerMap mapID);
   std::vector<Instruction *> getCalls(const std::string &funcName);
   Instruction *getRet() const;
+
+  std::shared_ptr<LoopsInfo> GetLoopInfo();
+  void SetLoopRange(std::pair<int64_t, int64_t> range);
+
 
 //  void CollectPaths(Instruction *from, Instruction *to,
 //                    std::vector<std::vector<Instruction *>> &allPaths);

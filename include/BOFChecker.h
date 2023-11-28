@@ -8,12 +8,10 @@
 
 namespace llvm {
 
-
 class BOFChecker : public Checker {
   size_t numOfVariables = 0;
   // Todo: later change to <string, some class reprs var>
   std::unordered_map<std::string, std::vector<int64_t>> variableValues;
-
 
   size_t GetFormatStringSize(GlobalVariable *var);
 
@@ -26,20 +24,19 @@ class BOFChecker : public Checker {
   Instruction *DetectOutOfBoundAccess(MallocedObject *obj);
 
   std::string GetGepVarName(GetElementPtrInst *gep);
-  std::string GetArgName(Argument* arg);
+  std::string GetArgName(Argument *arg);
 
-  void StoreConstant(StoreInst* storeInst);
-  void StoreInstruction(StoreInst* storeInst);
+  void StoreConstant(StoreInst *storeInst);
+  void StoreInstruction(StoreInst *storeInst);
   void ValueAnalysis(Instruction *inst);
   size_t GetMallocedSize(Instruction *malloc);
   size_t GetGepOffset(GetElementPtrInst *gep);
   void ClearData();
 
-  void SetLoopHeaderInfo();
+  void SetLoopHeaderInfo(Function *function);
   bool AccessToOutOfBoundInCycle(GetElementPtrInst *gep, size_t mallocSize);
 
-  bool IsCorrectMemcpy(Instruction *mcInst);
-  bool IsCorrectMemcpy2(Instruction *mcInst);
+  Instruction *MemcpyValidation(Instruction *mcInst);
   Instruction *FindBOFAfterWrongMemcpy(Instruction *mcInst);
   Instruction *FindStrlenUsage(Instruction *alloca);
 

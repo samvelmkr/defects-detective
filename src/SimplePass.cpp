@@ -111,7 +111,7 @@ void SimplePass::analyze(Module &M) {
 
   auto bofLoc = analyzer->BOFCheck();
   if (bofLoc) {
-    errs() << bofLoc->getType().first << ": " << *bofLoc->getTrace().first << "|" <<  *bofLoc->getTrace().second << "\n";
+//    errs() << bofLoc->getType().first << ": " << *bofLoc->getTrace().first << "|" <<  *bofLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(bofLoc->getTrace().first, bofLoc->getTrace().second);
     GenSarif.addResult(BugReport(Trace, bofLoc->getType().first, bofLoc->getType().second));
     GenSarif.save();

@@ -67,7 +67,7 @@ bool MallocedObject::isDeallocated() const {
   return !mallocFree.second.empty();
 }
 
-int64_t CalculateOffset(GetElementPtrInst *gep) {
+int64_t CalculateOffsetInBits(GetElementPtrInst *gep) {
   Module *module = gep->getModule();
   DataLayout dataLayout(module->getDataLayout());
   SmallVector<Value *, 8> indices(gep->op_begin() + 1, gep->op_end());
@@ -79,11 +79,6 @@ int64_t CalculateOffset(GetElementPtrInst *gep) {
   }
 
   offset = dataLayout.getIndexedOffsetInType(elemTy_ptr->getPointerElementType(), indices);
-//         << "| " << dataLayout.getPointerTypeSizeInBits(elemTy_ptr) << "\n";
-//  errs() << "PointerTypeSize: "  << dataLayout.getPointerTypeSize(elemTy_ptr) << "\n";
-//  errs() << "getIndexSize: "  << dataLayout.getIndexSize(offset) << "\n";
-//  errs() << "getTypeAllocSize: "  << dataLayout.getTypeAllocSize(elemTy_ptr) << "\n";
-//  errs() << "getTypeAllocSize: "  << dataLayout.getInde << "\n";
   return static_cast<int64_t>(offset);
 }
 
@@ -129,12 +124,12 @@ std::unordered_map<Value *, std::unordered_set<Value *>> *FuncInfo::SelectMap(An
   llvm::report_fatal_error("Not found corresponding map.");
 }
 
-void FuncInfo::AddEdge(AnalyzerMap mapID, Value * source, Value * destination) {
+void FuncInfo::AddEdge(AnalyzerMap mapID, Value *source, Value *destination) {
   auto *map = SelectMap(mapID);
   map->operator[](source).insert(destination);
 }
 
-bool FuncInfo::HasEdge(AnalyzerMap mapID, Value * source, Value * destination) {
+bool FuncInfo::HasEdge(AnalyzerMap mapID, Value *source, Value *destination) {
   auto *map = SelectMap(mapID);
   auto sourceIt = map->find(source);
   if (sourceIt != map->end()) {
@@ -143,7 +138,7 @@ bool FuncInfo::HasEdge(AnalyzerMap mapID, Value * source, Value * destination) {
   return false;
 }
 
-void FuncInfo::RemoveEdge(AnalyzerMap mapID, Value * source, Value * destination) {
+void FuncInfo::RemoveEdge(AnalyzerMap mapID, Value *source, Value *destination) {
   auto *map = SelectMap(mapID);
   if (HasEdge(mapID, source, destination)) {
     map->operator[](source).erase(destination);
@@ -200,7 +195,7 @@ void FuncInfo::UpdateDataDeps() {
 
   for (Instruction *mallocInst : callInstructions.at(CallInstruction::Malloc)) {
     for (auto &dependentVal : forwardDependencyMap[mallocInst]) {
-      auto* dependentInst = dyn_cast<Instruction>(dependentVal);
+      auto *dependentInst = dyn_cast<Instruction>(dependentVal);
       if (dependentInst->getOpcode() == Instruction::GetElementPtr) {
         ProcessGepInsts(dependentInst);
       }
@@ -216,7 +211,7 @@ void FuncInfo::CollectMallocedObjs() {
 
   for (Instruction *mallocInst : callInstructions[CallInstruction::Malloc]) {
     DFS(AnalyzerMap::ForwardDependencyMap, mallocInst, [mallocInst, this](Value *current) {
-      auto* currentInst = dyn_cast<Instruction>(current);
+      auto *currentInst = dyn_cast<Instruction>(current);
       if (currentInst->getOpcode() == Instruction::Alloca) {
         auto obj = std::make_shared<MallocedObject>(currentInst);
         obj->setMallocCall(mallocInst);
@@ -227,7 +222,7 @@ void FuncInfo::CollectMallocedObjs() {
         auto obj = std::make_shared<MallocedObject>(currentInst);
         obj->setMallocCall(mallocInst);
         auto *gep = dyn_cast<GetElementPtrInst>(currentInst);
-        size_t offset = CalculateOffset(gep);
+        size_t offset = CalculateOffsetInBits(gep);
 
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
         auto *next = dyn_cast<Instruction>(*(forwardDependencyMap[current].begin()));
@@ -306,6 +301,7 @@ FuncInfo::FuncInfo(llvm::Function *func) {
   ConstructDataDeps();
   CollectMallocedObjs();
   ConstructFlowDeps();
+  DetectLoops();
 }
 
 MallocedObject *FuncInfo::FindSuitableObj(Instruction *base) {
@@ -321,8 +317,7 @@ MallocedObject *FuncInfo::FindSuitableObj(Instruction *base) {
 bool FuncInfo::DFS(AnalyzerMap mapID,
                    Instruction *start,
                    const std::function<bool(Value *)> &terminationCondition,
-                   const std::function<bool(Value *)> &continueCondition,
-                   const std::function<void(Value *)> &getLoopInfo) {
+                   const std::function<bool(Value *)> &continueCondition) {
   auto *map = SelectMap(mapID);
 
   std::unordered_set<Value *> visitedInstructions;
@@ -350,12 +345,26 @@ bool FuncInfo::DFS(AnalyzerMap mapID,
     for (Value *next : map->operator[](current)) {
       if (visitedInstructions.find(next) == visitedInstructions.end()) {
         dfsStack.push(next);
-      } else if (getLoopInfo) {
-        getLoopInfo(current);
       }
     }
   }
   return false;
+}
+
+Instruction *FuncInfo::GetDeclaration(Instruction *inst) {
+  Instruction *declaration = nullptr;
+  DFS(AnalyzerMap::BackwardDependencyMap, inst, [&declaration](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+    if (currInst->getOpcode() == Instruction::Alloca) {
+      declaration = currInst;
+      return true;
+    }
+    return false;
+  });
+  return declaration;
 }
 
 void FuncInfo::printMap(AnalyzerMap mapID) {
@@ -382,6 +391,157 @@ std::vector<Instruction *> FuncInfo::getCalls(const std::string &funcName) {
 Instruction *FuncInfo::getRet() const {
   return ret;
 }
+
+bool FuncInfo::DetectLoopsUtil(Function *f, BasicBlock *BB, std::unordered_set<BasicBlock *> &visited,
+                               std::unordered_set<BasicBlock *> &recStack) {
+  visited.insert(BB);
+  recStack.insert(BB);
+
+  for (BasicBlock *succ : successors(BB)) {
+    // If the successor is not visited, perform DFS on it
+    if (visited.find(succ) == visited.end()) {
+      if (DetectLoopsUtil(f, succ, visited, recStack)) {
+        return true; // Loop found
+      }
+    }
+
+      // If the successor is in the recursion stack, it is a back edge, indicating a loop
+    else if (recStack.find(succ) != recStack.end()) {
+//      errs() << "Loop detected in function " << f->getName() << ":\n";
+//      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
+      auto *latch = dyn_cast<Instruction>(BB->getTerminator());
+      if (latch->getOpcode() != Instruction::Br) {
+        continue;
+      }
+
+      BasicBlock *headerBB = succ;
+      loopInfo = std::make_unique<LoopsInfo>(headerBB, latch);
+      return true;
+    }
+  }
+
+  recStack.erase(BB);
+  return false;
+}
+
+void FuncInfo::DetectLoops() {
+  std::unordered_set<BasicBlock *> visited;
+  std::unordered_set<BasicBlock *> recStack;
+
+  for (BasicBlock &BB : *function) {
+    if (visited.find(&BB) == visited.end() && DetectLoopsUtil(function, &BB, visited, recStack)) {
+      SetLoopHeaderInfo();
+      SetLoopScope();
+      return;
+    }
+  }
+}
+
+void FuncInfo::SetLoopScope() {
+  BasicBlock *header = loopInfo->GetHeader();
+  Instruction *latch = loopInfo->GetLatch();
+
+  std::vector<BasicBlock *> scope;
+  bool startLoopScope = false;
+  BasicBlock *endLoop = latch->getParent();
+  for (auto &bb : *function) {
+    if (&bb == header) {
+      startLoopScope = true;
+    }
+    if (!startLoopScope) {
+      continue;
+    }
+    scope.push_back(&bb);
+    if (&bb == endLoop) {
+      break;
+    }
+  }
+
+  loopInfo->SetScope(scope);
+}
+
+void FuncInfo::SetLoopHeaderInfo() {
+  Instruction *condition = loopInfo->GetCondition();
+  auto *opInst1 = dyn_cast<Instruction>(condition->getOperand(0));
+  Instruction *loopVar = GetDeclaration(opInst1);
+  loopInfo->SetLoopVar(loopVar);
+
+  auto *opInst2 = dyn_cast<Instruction>(condition->getOperand(1));
+  Instruction *loopSize = GetDeclaration(opInst2);
+  loopInfo->SetLoopSize(loopSize);
+}
+
+std::shared_ptr<LoopsInfo> FuncInfo::GetLoopInfo() {
+  return loopInfo;
+}
+
+void FuncInfo::SetLoopRange(std::pair<int64_t, int64_t> range) {
+  // validate only ICMP_SLT and ICMP_SLE
+  auto predicate = loopInfo->GetPredicate();
+  if (predicate == CmpInst::ICMP_SLT) {
+    --range.second;
+  }
+  loopInfo->SetRange(range);
+}
+
+//void FuncInfo::DetectLoopsUtil(Value *u, std::unordered_set<Value *> &discovered,
+//                               std::unordered_set<Value *> &finished) {
+//
+//  discovered.insert(u);
+//
+////  errs() << "discovered : ";
+////  for (Value * val : discovered) {
+////    errs() << *val << ", ";
+////  } errs() << "\n\n";
+////
+////  errs() << "finished : ";
+////  for (Value * val : finished) {
+////    errs() << *val << ", ";
+////  }errs() << "\n\n";
+//
+//  for (Value *v : forwardFlowMap[u]) {
+////    errs() << "\ttmp: " << *v << "\n";
+//    // Detect cycles
+//    if (discovered.find(v) != discovered.end()) {
+//      auto* latch = dyn_cast<Instruction>(u);
+//      if (latch->getOpcode() != Instruction::Br) {
+//        break;
+//      }
+//      auto* header = dyn_cast<Instruction>(v);
+//      BasicBlock* headerBB = header->getParent();
+//      loopInfo = std::make_unique<LoopsInfo>(headerBB, latch);
+//      errs() << "Cycle detected: found a back edge from " << *u << " to " << *v << "\n";
+//      break;
+//    }
+//
+//    if (finished.find(v) == finished.end()) {
+//      DetectLoopsUtil(v, discovered, finished);
+//    }
+//
+//    discovered.erase(u);
+//    finished.insert(u);
+//  }
+//}
+
+//void FuncInfo::DetectLoops() {
+//  std::unordered_set<Value *> discovered;
+//  std::unordered_set<Value *> finished;
+//
+//  Instruction* latch = nullptr;
+//  for (const auto &entry : forwardFlowMap) {
+//    Value *u = entry.first;
+//    if (entry.second.empty()) {
+//      continue;
+//    }
+//    if (discovered.find(u) == discovered.end() && finished.find(u) == finished.end()) {
+//      DetectLoopsUtil(u, discovered, finished);
+//      if (loopInfo) {
+//        SetLoopHeaderInfo();
+//        SetLoopScope();
+//        return;
+//      }
+//    }
+//  }
 
 //// TODO: write iterative algorithm to avoid stack overflow
 //void FuncInfo::FindPaths(std::unordered_set<Instruction *> &visitedInsts,

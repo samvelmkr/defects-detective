@@ -48,7 +48,7 @@ bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *fr
 
     if (currInst->getOpcode() == Instruction::GetElementPtr) {
       auto *gep = dyn_cast<GetElementPtrInst>(currInst);
-      if (obj->getOffset() == CalculateOffset(gep)) {
+      if (obj->getOffset() == CalculateOffsetInBits(gep)) {
         reachedFirstGEP = true;
       }
     }
@@ -57,7 +57,7 @@ bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *fr
     }
     if (reachedAlloca && currInst->getOpcode() == Instruction::GetElementPtr) {
       auto *gep = dyn_cast<GetElementPtrInst>(currInst);
-      if (obj->getOffset() == CalculateOffset(gep)) {
+      if (obj->getOffset() == CalculateOffsetInBits(gep)) {
         reachedSecondGEP = true;
       }
     }
