@@ -55,10 +55,7 @@ unsigned SimplePass::getInstructionLine(const Value *val) {
   } else if (auto* global = dyn_cast<GlobalVariable>(val)) {
     if (auto *dig = dyn_cast<DIGlobalVariableExpression>(global->getMetadata("dbg"))) {
       if (auto *div = dyn_cast<DIGlobalVariable>(dig->getVariable())) {
-        errs() << "SSSSSS" << div->getLine() << "\n";
         return div->getLine();
-      } else {
-        errs() << "qunem berand\n";
       }
     }
   }
@@ -102,7 +99,7 @@ void SimplePass::analyze(Module &M) {
   auto analyzer = std::make_shared<Analyzer>(M);
   auto mlLoc = analyzer->MLCheck();
   if (mlLoc) {
-    errs() << mlLoc->getType().first << ": " << *mlLoc->getTrace().first << "|" << *mlLoc->getTrace().second << "\n";
+//    errs() << mlLoc->getType().first << ": " << *mlLoc->getTrace().first << "|" << *mlLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(mlLoc->getTrace().first, mlLoc->getTrace().second);
     GenSarif.addResult(BugReport(Trace, mlLoc->getType().first, mlLoc->getType().second));
     GenSarif.save();
@@ -111,7 +108,7 @@ void SimplePass::analyze(Module &M) {
 
   auto uafLoc = analyzer->UAFCheck();
   if (uafLoc) {
-    errs() << uafLoc->getType().first << ": " << *uafLoc->getTrace().first << "|" << *uafLoc->getTrace().second << "\n";
+//    errs() << uafLoc->getType().first << ": " << *uafLoc->getTrace().first << "|" << *uafLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(uafLoc->getTrace().first, uafLoc->getTrace().second);
     GenSarif.addResult(BugReport(Trace, uafLoc->getType().first, uafLoc->getType().second));
     GenSarif.save();
@@ -120,7 +117,7 @@ void SimplePass::analyze(Module &M) {
 
   auto bofLoc = analyzer->BOFCheck();
   if (bofLoc) {
-    errs() << bofLoc->getType().first << ": " << *bofLoc->getTrace().first << "|" << *bofLoc->getTrace().second << "\n";
+//    errs() << bofLoc->getType().first << ": " << *bofLoc->getTrace().first << "|" << *bofLoc->getTrace().second << "\n";
     auto Trace = createTraceOfPairInst(bofLoc->getTrace().first, bofLoc->getTrace().second);
     GenSarif.addResult(BugReport(Trace, bofLoc->getType().first, bofLoc->getType().second));
     GenSarif.save();

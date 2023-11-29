@@ -21,9 +21,9 @@ class BOFChecker : public Checker {
   size_t GetFormatStringSize(GlobalVariable *var);
 
   std::pair<Value *, Instruction *> FindBOFInst(Instruction *inst,
-                                                      Instruction *malloc, size_t mallocSize,
-                                                      const std::vector<Instruction *> &geps,
-                                                      const std::vector<Instruction *> &memcpies);
+                                                Instruction *malloc, size_t mallocSize,
+                                                const std::vector<Instruction *> &geps,
+                                                const std::vector<Instruction *> &memcpies);
   bool IsBOFGep(GetElementPtrInst *gep, size_t mallocSize);
   bool IsCorrespondingMemcpy(Instruction *mc, Instruction *malloc);
 
@@ -35,7 +35,7 @@ class BOFChecker : public Checker {
   void StoreConstant(StoreInst *storeInst);
   void StoreInstruction(StoreInst *storeInst);
   void ValueAnalysis(Instruction *inst);
-  void CreateNewVar(const std::string& name);
+  void CreateNewVar(const std::string &name);
   size_t GetMallocedSize(Instruction *malloc);
   size_t GetGepOffset(GetElementPtrInst *gep);
   void ClearData();
@@ -47,7 +47,9 @@ class BOFChecker : public Checker {
   Instruction *FindBOFAfterWrongMemcpy(Instruction *mcInst);
   Instruction *FindStrlenUsage(Instruction *alloca);
 
-  std::pair<Value *, Instruction *> SnprintfCallValidation(Instruction* inst);
+  std::pair<Value *, Instruction *> SnprintfCallValidation(Instruction *inst, Instruction *snprintInst);
+
+  std::pair<Value *, Instruction *> OutOfBoundFromArray(Instruction *inst);
   void printVA();
 public:
   BOFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
