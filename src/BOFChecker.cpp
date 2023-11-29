@@ -90,12 +90,12 @@ void BOFChecker::SetLoopHeaderInfo(Function *function) {
     }
   }
 
-  int64_t from = variableValues[loopVar->getName().str()][0];
+  int64_t from = variableValues[loopVar->getName().str()]->val[0];
   int64_t to = 0;
-  if (auto* constInst = dyn_cast<ConstantInt>(loopSize)) {
+  if (auto *constInst = dyn_cast<ConstantInt>(loopSize)) {
     to = constInst->getSExtValue();
   } else {
-    to = variableValues[loopSize->getName().str()][0];
+    to = variableValues[loopSize->getName().str()]->val[0];
   }
   std::pair<int64_t, int64_t> range = {from, to};
 
@@ -114,7 +114,7 @@ size_t BOFChecker::GetMallocedSize(Instruction *malloc) {
     llvm::report_fatal_error("Cannot find malloc size");
   }
 
-  int64_t size = variableValues[sizeInst->getName().str()][0];
+  int64_t size = variableValues[sizeInst->getName().str()]->val[0];
   if (size < 0) {
     llvm::report_fatal_error("Negative size of allocated memory");
   }
@@ -133,7 +133,7 @@ size_t BOFChecker::GetGepOffset(GetElementPtrInst *gep) {
     llvm::report_fatal_error("Cannot find offset");
   }
 
-  int64_t offset = variableValues[offsetInst->getName().str()][0];
+  int64_t offset = variableValues[offsetInst->getName().str()]->val[0];
   if (offset < 0) {
     llvm::report_fatal_error("Negative offset of allocated memory");
   }
@@ -161,11 +161,11 @@ void BOFChecker::StoreConstant(StoreInst *storeInst) {
   auto *constValue = dyn_cast<ConstantInt>(storedValue);
   auto *pointerOp = storeInst->getPointerOperand();
   if (auto *gep = dyn_cast<GetElementPtrInst>(pointerOp)) {
-    variableValues[GetGepVarName(gep)][GetGepOffset(gep)] = constValue->getSExtValue();
+    variableValues[GetGepVarName(gep)]->val[GetGepOffset(gep)] = constValue->getSExtValue();
 
   } else if (isa<Instruction>(pointerOp)) {
     std::string operandName = pointerOp->getName().str();
-    variableValues[operandName][0] = constValue->getSExtValue();
+    variableValues[operandName]->val[0] = constValue->getSExtValue();
   }
 }
 
@@ -173,10 +173,28 @@ void BOFChecker::StoreInstruction(llvm::StoreInst *storeInst) {
   auto *storedValue = storeInst->getValueOperand();
   auto *pointerOp = storeInst->getPointerOperand();
   if (auto *arg = dyn_cast<Argument>(storedValue)) {
-    variableValues[pointerOp->getName().str()] = variableValues[GetArgName(arg)];
-  } else if (isa<AllocaInst>(storedValue) || isa<LoadInst>(storedValue)) {
+    std::string argName = GetArgName(arg);
+    if (variableValues.find(argName) == variableValues.end()) {
+      CreateNewVar(argName);
+    }
+    variableValues[pointerOp->getName().str()] = variableValues[argName];
+  }
+//  } else if (isa<AllocaInst>(storedValue) || isa<LoadInst>(storedValue)) {
+//    variableValues[pointerOp->getName().str()] = variableValues[storedValue->getName().str()];
+//  }
+  else {
     variableValues[pointerOp->getName().str()] = variableValues[storedValue->getName().str()];
   }
+}
+
+void BOFChecker::CreateNewVar(const std::string &name) {
+  if (variableValues.find(name) != variableValues.end()) {
+    errs() << name << variableValues[name]->size << "\n";
+  }
+  auto newVal = std::make_shared<Val>();
+  newVal->size = 1;
+  newVal->val.resize(1, 0);
+  variableValues[name] = newVal;
 }
 
 void BOFChecker::ValueAnalysis(Instruction *inst) {
@@ -186,7 +204,15 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
     if (!inst->hasName()) {
       inst->setName("var" + std::to_string(++numOfVariables));
     }
-    variableValues[inst->getName().str()].resize(1, 0);
+    CreateNewVar(inst->getName().str());
+    auto *allocaInst = dyn_cast<AllocaInst>(inst);
+    if (auto *arrayType = dyn_cast<ArrayType>(allocaInst->getAllocatedType())) {
+      uint64_t numElements = arrayType->getNumElements();
+      variableValues[inst->getName().str()]->size = numElements;
+      outs() << "Number of elements: " << numElements << "\n";
+    } else {
+      errs() << "Allocated type is not an array type\n";
+    }
 
   } else if (inst->getOpcode() == Instruction::Store) {
     auto *storeInst = dyn_cast<StoreInst>(inst);
@@ -214,10 +240,11 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
     if (!inst->hasName()) {
       inst->setName("var" + std::to_string(++numOfVariables));
     }
-    variableValues[inst->getName().str()].resize(1, 0);
-    variableValues[inst->getName().str()][0] = variableValues[op1->getName().str()][0] - constValue->getSExtValue();
+    CreateNewVar(inst->getName().str());
+    variableValues[inst->getName().str()]->val[0] =
+        variableValues[op1->getName().str()]->val[0] - constValue->getSExtValue();
 
-  } else if (inst->getOpcode() == Instruction::SExt) {
+  } else if (inst->getOpcode() == Instruction::SExt || inst->getOpcode() == Instruction::BitCast) {
     if (!inst->hasName()) {
       inst->setName("var" + std::to_string(++numOfVariables));
     }
@@ -229,60 +256,63 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
       return;
     }
     size_t offset = GetGepOffset(gep);
+    std::string gepName = GetGepVarName(gep);
 
     // Todo: later get size from malloc or alloca if type is array
-    if (variableValues[GetGepVarName(gep)].size() < offset + 1) {
-      variableValues[GetGepVarName(gep)].resize(offset + 1, 0);
+    if (variableValues[gepName]->val.size() < offset + 1) {
+      variableValues[gepName]->val.resize(offset + 1, 0);
     }
 
     if (!inst->hasName()) {
       inst->setName("var" + std::to_string(++numOfVariables));
     }
-    variableValues[inst->getName().str()].resize(1, 0);
-    variableValues[inst->getName().str()][0] = variableValues[GetGepVarName(gep)][offset];
+    CreateNewVar(inst->getName().str());
+    variableValues[inst->getName().str()]->val[0] = variableValues[gepName]->val[offset];
+
+    Type *pointerType = gep->getPointerOperandType();
+
+    if (auto *ptrType = dyn_cast<PointerType>(pointerType)) {
+      Type *elementType = ptrType->getElementType();
+      if (elementType->isPointerTy() || elementType->isArrayTy()) {
+        variableValues[inst->getName().str()] = variableValues[gepName];
+        errs() << "The operand has type 'pointer to array'\n";
+      } else {
+        errs() << "The operand has a different pointer type\n";
+      }
+    }
 
   } else if (inst->getOpcode() == Instruction::Call) {
     auto *call = dyn_cast<CallInst>(inst);
     Function *calledFunc = call->getCalledFunction();
+
+    if (!inst->hasName()) {
+      inst->setName(calledFunc->getName().str() + std::to_string(++numOfVariables));
+    }
+    CreateNewVar(inst->getName().str());
+    if (IsCallWithName(inst, CallInstruction::Malloc)) {
+      variableValues[inst->getName().str()]->size = GetMallocedSize(inst);
+    }
     if (calledFunc->isDeclarationForLinker()) {
       return;
     }
 
-    errs() << "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5\n";
-    for (Argument &arg : calledFunc->args()) {
-      errs() << arg << "\n";
-    }
-    errs() << "---------------------------------------------\n";
-    for (auto &arg : call->operands()) {
-      errs() << *arg << "\n";
-    }
-    errs() << "---------------------------------------------\n";
+    // get size of var from malloc
 
     size_t argNum = 0;
     for (Argument &arg : calledFunc->args()) {
-      errs() << "arg " << arg << "\n";
+      errs() << arg << "\n";
+      arg.setName(std::to_string(argNum));
 
-      if (auto* constInst = dyn_cast<ConstantInt>(call->getOperand(argNum))) {
-        arg.setName(std::to_string(argNum));
-        errs() << "---\n";
-        errs() << arg << " name:" << GetArgName(&arg) << "\n";
-        errs() << arg << arg.getName() << "\n";
-        errs() << "---\n";
-        variableValues[GetArgName(&arg)].resize(1, 0);
-        variableValues[GetArgName(&arg)][0] = constInst->getSExtValue();
+      if (auto *constInst = dyn_cast<ConstantInt>(call->getOperand(argNum))) {
+        CreateNewVar(GetArgName(&arg));
+        variableValues[GetArgName(&arg)]->val[0] = constInst->getSExtValue();
       }
       if (arg.getType()->isPointerTy()) {
-        arg.setName(std::to_string(argNum));
         errs() << arg << arg.getName() << "\n";
         variableValues[GetArgName(&arg)] = variableValues[call->getArgOperand(argNum)->getName().str()];
       }
-
-
-
       argNum++;
     }
-    errs() << "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5\n";
-
   }
 
 }
@@ -316,42 +346,40 @@ bool BOFChecker::IsBOFGep(GetElementPtrInst *gep, size_t mallocSize) {
   return mallocSize <= GetGepOffset(gep);
 }
 
-Instruction *BOFChecker::FindBOFInst(Instruction *inst, size_t mallocSize,
-                                     const std::vector<Instruction *> &geps,
-                                     const std::vector<Instruction *> &memcpies) {
+std::pair<Value *, Instruction *> BOFChecker::FindBOFInst(Instruction *inst,
+                                                          Instruction *malloc, size_t mallocSize,
+                                                          const std::vector<Instruction *> &geps,
+                                                          const std::vector<Instruction *> &memcpies) {
   // Analyse geps
   if (inst->getOpcode() == Instruction::GetElementPtr &&
       std::find(geps.begin(), geps.end(), inst) != geps.end()) {
     auto *gepInst = dyn_cast<GetElementPtrInst>(inst);
     if (IsBOFGep(gepInst, mallocSize)) {
-      return inst;
+      return {malloc, inst};
     }
   }
   // Analyse memcpies
   if (IsCallWithName(inst, CallInstruction::Memcpy) &&
       std::find(memcpies.begin(), memcpies.end(), inst) != memcpies.end()) {
     if (Instruction *bofInst = MemcpyValidation(inst)) {
-      return bofInst;
+      return {malloc, bofInst};
     }
   }
 
   if (IsCallWithName(inst, CallInstruction::Snprintf)) {
-    if (!ValidSnprintfCall(inst)) {
-      errs() << "ssss" << *inst << "\n";
-      return inst;
-    }
+    return SnprintfCallValidation(inst);
   }
-  return nullptr;
+  return {};
 }
 
 // Fixme: Validate multiple malloc with one cycle
-Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
+std::pair<Value *, Instruction *> BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
   Instruction *malloc = obj->getMallocCall();
   Function *function = malloc->getFunction();
 
   std::vector<Instruction *> frees = obj->getFreeCalls();
   Instruction *start = &*function->getEntryBlock().begin();
-  Instruction *bofInst = nullptr;
+  std::pair<Value *, Instruction *> bofTrace = {};
   size_t mallocSize = 0;
 
   std::vector<Instruction *> geps = CollectAllInstsWithType(function, AnalyzerMap::ForwardDependencyMap, malloc,
@@ -365,7 +393,7 @@ Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
                                                                 });
 
   DFSOptions options;
-  options.terminationCondition = [malloc, frees, &mallocSize, &bofInst,
+  options.terminationCondition = [malloc, frees, &mallocSize, &bofTrace,
       &geps, &memcpies, this](Value *curr) {
     if (!isa<Instruction>(curr)) {
       return false;
@@ -374,7 +402,7 @@ Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
 
     if (currInst->getOpcode() == Instruction::Ret ||
         IsCallWithName(currInst, CallInstruction::Free) &&
-        std::find(frees.begin(), frees.end(), currInst) != frees.end()) {
+            std::find(frees.begin(), frees.end(), currInst) != frees.end()) {
       return true;
     }
 
@@ -387,9 +415,9 @@ Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
       mallocSize = GetMallocedSize(malloc);
     }
 
-    auto *foundInst = FindBOFInst(currInst, mallocSize, geps, memcpies);
-    if (foundInst) {
-      bofInst = foundInst;
+    auto foundBof = FindBOFInst(currInst, malloc, mallocSize, geps, memcpies);
+    if (foundBof.first && foundBof.second) {
+      bofTrace = foundBof;
       return true;
     }
     return false;
@@ -403,7 +431,7 @@ Instruction *BOFChecker::DetectOutOfBoundAccess(MallocedObject *obj) {
 //  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
 
   ClearData();
-  return bofInst;
+  return bofTrace;
 }
 
 void BOFChecker::ClearData() {
@@ -411,18 +439,19 @@ void BOFChecker::ClearData() {
   numOfVariables = 0;
 }
 
-std::pair<Instruction *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *function) {
+std::pair<Value *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *function) {
   FuncInfo *funcInfo = funcInfos[function].get();
   for (auto &obj : funcInfo->mallocedObjs) {
 //    if (geps.empty()) {
 //      continue;
 //    }
     errs() << "PPPPPPP\n";
-    if (auto *bofInst = DetectOutOfBoundAccess(obj.second.get())) {
-      return {obj.first, bofInst};
+    auto res = DetectOutOfBoundAccess(obj.second.get());
+    if (res.first && res.second) {
+      return res;
     }
 
-    variableValues.clear();
+    ClearData();
   }
 
   return {};
@@ -440,7 +469,7 @@ Instruction *BOFChecker::MemcpyValidation(Instruction *mcInst) {
     mcSize = constInt->getZExtValue();
   } else {
     auto *sizeInst = dyn_cast<Instruction>(size);
-    mcSize = variableValues[sizeInst->getName().str()][0];
+    mcSize = variableValues[sizeInst->getName().str()]->val[0];
   }
 
   if (auto *globalVar = dyn_cast<GlobalVariable>(src)) {
@@ -452,7 +481,7 @@ Instruction *BOFChecker::MemcpyValidation(Instruction *mcInst) {
   } else if (auto *gep = dyn_cast<GetElementPtrInst>(src)) {
     mcSize += CalculateOffsetInBits(gep);
     auto *inst = GetDeclaration(dyn_cast<Instruction>(gep->getPointerOperand()));
-    sourceArraySize = variableValues[inst->getName().str()].size();
+    sourceArraySize = variableValues[inst->getName().str()]->val.size();
   }
 
   if (sourceArraySize > mcSize) {
@@ -465,30 +494,45 @@ Instruction *BOFChecker::MemcpyValidation(Instruction *mcInst) {
   return nullptr;
 }
 
-bool BOFChecker::ValidSnprintfCall(Instruction* inst) {
-  auto* call = dyn_cast<CallInst>(inst);
-  Value* bufVal = call->getOperand(0);
-  Value* sizeVal = call->getOperand(1);
+std::pair<Value *, Instruction *> BOFChecker::SnprintfCallValidation(Instruction *inst) {
+  auto *call = dyn_cast<CallInst>(inst);
+  Value *bufVal = call->getOperand(0)->stripPointerCasts();
+  Value *sizeVal = call->getOperand(1);
   errs() << "\tbuf: " << *bufVal << "\n";
-  errs() << *bufVal->stripPointerCasts() << "\n";
-  Type *bufVarType = bufVal->getType()->getPointerElementType();
-  if (isa<ArrayType>(bufVarType)) {
-    uint64_t bufSize = dyn_cast<ArrayType>(bufVarType)->getNumElements();
-    errs() << "^^^^" <<  bufSize << "\n";
-  }
-//  if (auto *globalVar = dyn_cast<GlobalVariable>(bufVal)) {
-//
-//  }
-  if (auto* sizeInst = dyn_cast<Instruction>(sizeVal)) {
-    if (variableValues.find(sizeInst->getName().str()) == variableValues.end()) {
-      return true;
+
+  uint64_t bufArraySize = 0;
+  uint64_t snprintfSize = 0;
+
+  if (auto *globalVar = dyn_cast<GlobalVariable>(bufVal)) {
+    if (auto *arrayType = dyn_cast<ArrayType>(globalVar->getValueType())) {
+      bufArraySize = arrayType->getNumElements();
+      errs() << "Size of the array: " << bufArraySize << "\n";
     }
-    errs() << "\tsize: " << sizeInst << " = " << variableValues[sizeInst->getName().str()][0] << "\n";
+  } else if (auto *bufInst = dyn_cast<Instruction>(bufVal)) {
+    bufArraySize = variableValues[bufInst->getName().str()]->size;
   }
 
-  return false;
-}
+  if (auto *sizeInst = dyn_cast<Instruction>(sizeVal)) {
+    if (variableValues.find(sizeInst->getName().str()) == variableValues.end()) {
+      return {};
+    }
+    snprintfSize = variableValues[sizeInst->getName().str()]->val[0];
+    errs() << "\tsize: " << *sizeInst << " = " << variableValues[sizeInst->getName().str()]->val[0] << "\n";
+  } else if (auto *constInst = dyn_cast<ConstantInt>(sizeVal)) {
+    snprintfSize = constInst->getSExtValue();
+  }
 
+  errs() << "bufArraySize" << bufArraySize << "==" << "snprintfSize" << snprintfSize << "\n";
+
+  if (bufArraySize == snprintfSize) {
+    return {};
+  }
+
+  if (!isa<GlobalVariable>(bufVal)) {
+//    return {malloc, inst};
+  }
+  return {bufVal, inst};
+}
 
 Instruction *BOFChecker::FindBOFAfterWrongMemcpy(Instruction *mcInst) {
   Instruction *alloca = GetDeclaration(mcInst);
@@ -518,7 +562,7 @@ Instruction *BOFChecker::FindBOFAfterWrongMemcpy(Instruction *mcInst) {
 //  return {};
 //}
 
-std::pair<Instruction *, Instruction *> BOFChecker::Check(Function *function) {
+std::pair<Value *, Instruction *> BOFChecker::Check(Function *function) {
   errs() << "PPPPPPP\n";
 
   auto scanfBOF = ScanfValidation(function);
@@ -538,10 +582,10 @@ std::pair<Instruction *, Instruction *> BOFChecker::Check(Function *function) {
 void BOFChecker::printVA() {
   for (auto &val : variableValues) {
     errs() << "\t" << val.first << " = { ";
-    for (auto &elem : val.second) {
+    for (auto &elem : val.second->val) {
       errs() << elem << " ";
     }
-    errs() << "}\n";
+    errs() << "}, size=" << val.second->size << "\n";
   }
 }
 

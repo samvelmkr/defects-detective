@@ -22,9 +22,9 @@ public:
   std::string getFunctionLocation(const Function *Func);
   SmallVector<std::pair<std::string, unsigned>> getAllFunctionsTrace(Module &M);
   static unsigned getFunctionFirstLine(const Function *Func);
-  static unsigned getInstructionLine(const Instruction *Inst);
+  static unsigned getInstructionLine(const Value *Inst);
 
-  SmallVector<std::pair<std::string, unsigned>> createTraceOfPairInst(Instruction *allocInst, Instruction *instBOF);
+  SmallVector<std::pair<std::string, unsigned>> createTraceOfPairInst(Value *start, Instruction *end);
   };
 
 #endif // SIMPLE_PASS_H

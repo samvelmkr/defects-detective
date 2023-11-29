@@ -12,7 +12,7 @@ class UAFChecker : public Checker {
 public:
   UAFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
   bool isUseAfterFree(Instruction* inst);
-  std::pair<Instruction *, Instruction *> Check(Function* function) override;
+  std::pair<Value *, Instruction *> Check(Function* function) override;
 };
 
 } // namespace llvm

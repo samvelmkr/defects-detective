@@ -50,7 +50,7 @@ public:
   size_t CalculNumOfArg(CallInst *cInst,
                         Instruction *pred);
 
-  virtual std::pair<Instruction *, Instruction *> Check(Function *function) = 0;
+  virtual std::pair<Value *, Instruction *> Check(Function *function) = 0;
 
   void CollectPaths(Instruction *from, Instruction *to,
                     std::vector<std::vector<Value *>> &allPaths);

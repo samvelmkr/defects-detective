@@ -147,7 +147,7 @@ std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vecto
   return {};
 }
 
-std::pair<Instruction *, Instruction *> MLChecker::Check(Function *function) {
+std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 
   auto mallocCalls = FindAllMallocCalls(function);
   if (mallocCalls.empty()) {
