@@ -30,7 +30,8 @@ private:
                                            CallInstruction::Time,
                                            CallInstruction::Srand,
                                            CallInstruction::Rand,
-                                           CallInstruction::Printf};
+                                           CallInstruction::Printf,
+                                           CallInstruction::Snprintf};
 
   bool IsLibraryFunction(Value *inst);
 protected:
@@ -49,7 +50,7 @@ public:
   size_t CalculNumOfArg(CallInst *cInst,
                         Instruction *pred);
 
-  virtual std::pair<Instruction *, Instruction *> Check(Function *function) = 0;
+  virtual std::pair<Value *, Instruction *> Check(Function *function) = 0;
 
   void CollectPaths(Instruction *from, Instruction *to,
                     std::vector<std::vector<Value *>> &allPaths);

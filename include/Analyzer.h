@@ -17,16 +17,16 @@ struct BugType {
 
 class BugTrace {
 private:
-  std::pair<Instruction *, Instruction *> trace = {};
+  std::pair<Value *, Instruction *> trace = {};
   std::pair<std::string, int> type = {};
 public:
   BugTrace() = default;
-  BugTrace(const std::pair<Instruction *, Instruction *> &bugPair,
+  BugTrace(const std::pair<Value *, Instruction *> &bugPair,
            const std::pair<std::string, int> &bugType) {
     trace = bugPair;
     type = bugType;
   }
-  std::pair<Instruction *, Instruction *> getTrace() {
+  std::pair<Value *, Instruction *> getTrace() {
     return trace;
   }
   std::pair<std::string, int> getType() {

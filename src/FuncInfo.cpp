@@ -11,6 +11,7 @@ const std::string CallInstruction::Time = "time";
 const std::string CallInstruction::Srand = "srand";
 const std::string CallInstruction::Rand = "rand";
 const std::string CallInstruction::Printf = "printf";
+const std::string CallInstruction::Snprintf = "snprintf";
 
 bool IsCallWithName(Instruction *inst, const std::string &name) {
   if (auto *callInst = dyn_cast<CallInst>(inst)) {
@@ -407,8 +408,8 @@ bool FuncInfo::DetectLoopsUtil(Function *f, BasicBlock *BB, std::unordered_set<B
 
       // If the successor is in the recursion stack, it is a back edge, indicating a loop
     else if (recStack.find(succ) != recStack.end()) {
-//      errs() << "Loop detected in function " << f->getName() << ":\n";
-//      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
+      errs() << "Loop detected in function " << f->getName() << ":\n";
+      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
       auto *latch = dyn_cast<Instruction>(BB->getTerminator());
       if (latch->getOpcode() != Instruction::Br) {
         continue;
@@ -430,8 +431,14 @@ void FuncInfo::DetectLoops() {
 
   for (BasicBlock &BB : *function) {
     if (visited.find(&BB) == visited.end() && DetectLoopsUtil(function, &BB, visited, recStack)) {
+      errs() << "PPPPPPP\n";
+
       SetLoopHeaderInfo();
+      errs() << "PPPPPPP\n";
+
       SetLoopScope();
+
+      errs() << "PPPPPPP\n";
       return;
     }
   }
@@ -461,13 +468,25 @@ void FuncInfo::SetLoopScope() {
 }
 
 void FuncInfo::SetLoopHeaderInfo() {
+  errs() << "TTTTTTTTT\n";
   Instruction *condition = loopInfo->GetCondition();
-  auto *opInst1 = dyn_cast<Instruction>(condition->getOperand(0));
-  Instruction *loopVar = GetDeclaration(opInst1);
-  loopInfo->SetLoopVar(loopVar);
+  errs() << "TTTTTTTTT\n";
 
-  auto *opInst2 = dyn_cast<Instruction>(condition->getOperand(1));
-  Instruction *loopSize = GetDeclaration(opInst2);
+  auto *opInst1 = dyn_cast<Instruction>(condition->getOperand(0));
+  errs() << "TTTTTTTTT\n";
+
+  Instruction *loopVar = GetDeclaration(opInst1);
+  errs() << "TTTTTTTTT\n";
+
+  loopInfo->SetLoopVar(loopVar);
+  errs() << "TTTTTTTTT\n";
+
+  Value* loopSize = condition->getOperand(1);
+  if (auto *opInst2 = dyn_cast<Instruction>(loopSize)) {
+    errs() << "TTTTTTTTT\n";
+    loopSize = dyn_cast<Value>(GetDeclaration(opInst2));
+  }
+
   loopInfo->SetLoopSize(loopSize);
 }
 

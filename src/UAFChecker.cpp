@@ -33,7 +33,7 @@ bool UAFChecker::isUseAfterFree(Instruction *inst) {
   return useAfterFree;
 }
 
-std::pair<Instruction *, Instruction *> UAFChecker::Check(Function* function) {
+std::pair<Value *, Instruction *> UAFChecker::Check(Function* function) {
   FuncInfo* funcInfo = funcInfos[function].get();
 
   Instruction *useAfterFree = nullptr;

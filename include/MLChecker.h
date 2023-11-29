@@ -18,7 +18,7 @@ public:
   bool hasMallocFreePath(MallocedObject* obj, Instruction* free);
   bool hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free);
   std::pair<Instruction *, Instruction *> checkFreeExistence(std::vector<Value *> &path);
-  std::pair<Instruction *, Instruction *> Check(Function* function) override;
+  std::pair<Value *, Instruction *> Check(Function* function) override;
 };
 
 } // namespace llvm
