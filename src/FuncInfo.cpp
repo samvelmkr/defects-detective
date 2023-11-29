@@ -12,6 +12,10 @@ const std::string CallInstruction::Srand = "srand";
 const std::string CallInstruction::Rand = "rand";
 const std::string CallInstruction::Printf = "printf";
 const std::string CallInstruction::Snprintf = "snprintf";
+const std::string CallInstruction::Memset = "memset";
+const std::string CallInstruction::Strcpy = "strcpy";
+const std::string CallInstruction::Fopen = "fopen";
+const std::string CallInstruction::Fprint = "fprint";
 
 bool IsCallWithName(Instruction *inst, const std::string &name) {
   if (auto *callInst = dyn_cast<CallInst>(inst)) {
@@ -156,6 +160,9 @@ bool FuncInfo::ProcessStoreInsts(Instruction *storeInst) {
         AddEdge(AnalyzerMap::ForwardDependencyMap, arg, secondOp);
       }
       return true;
+    }
+    if (!isa<Instruction>(firstOp) || !isa<Instruction>(secondOp)) {
+      return false;
     }
     auto *fromInst = dyn_cast<Instruction>(firstOp);
     auto *toInst = dyn_cast<Instruction>(secondOp);
@@ -393,6 +400,7 @@ Instruction *FuncInfo::getRet() const {
   return ret;
 }
 
+// Todo: Perhaps do iteratively
 bool FuncInfo::DetectLoopsUtil(Function *f, BasicBlock *BB, std::unordered_set<BasicBlock *> &visited,
                                std::unordered_set<BasicBlock *> &recStack) {
   visited.insert(BB);
@@ -408,8 +416,8 @@ bool FuncInfo::DetectLoopsUtil(Function *f, BasicBlock *BB, std::unordered_set<B
 
       // If the successor is in the recursion stack, it is a back edge, indicating a loop
     else if (recStack.find(succ) != recStack.end()) {
-//      errs() << "Loop detected in function " << f->getName() << ":\n";
-//      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
+      errs() << "Loop detected in function " << f->getName() << ":\n";
+      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
       auto *latch = dyn_cast<Instruction>(BB->getTerminator());
       if (latch->getOpcode() != Instruction::Br) {
         continue;

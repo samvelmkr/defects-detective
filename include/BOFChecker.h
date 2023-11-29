@@ -50,6 +50,9 @@ class BOFChecker : public Checker {
   std::pair<Value *, Instruction *> SnprintfCallValidation(Instruction *inst, Instruction *snprintInst);
 
   std::pair<Value *, Instruction *> OutOfBoundFromArray(Instruction *inst);
+
+  // validate cases that cannot be reached by DetectOutOfBoundAccess
+  std::pair<Value *, Instruction *> BuildPathsToSuspiciousInstructions(MallocedObject *obj);
   void printVA();
 public:
   BOFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);

@@ -396,10 +396,10 @@ std::pair<Value *, Instruction *> BOFChecker::DetectOutOfBoundAccess(MallocedObj
       return true;
     }
 
-//    errs() << "inst:" << *currInst << "\n";
+    errs() << "inst:" << *currInst << "\n";
     ValueAnalysis(currInst);
-//    errs() << "inst:" << *currInst << "\n";
-//    printVA();
+    errs() << "inst:" << *currInst << "\n";
+    printVA();
     errs() << "\n";
     if (currInst == malloc) {
       mallocSize = GetMallocedSize(malloc);
@@ -465,13 +465,49 @@ std::pair<Value *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *
 //    if (geps.empty()) {
 //      continue;
 //    }
-    auto res = DetectOutOfBoundAccess(obj.second.get());
+//    auto res = DetectOutOfBoundAccess(obj.second.get());
+//    if (res.first && res.second) {
+//      return res;
+//    }
+
+    ClearData();
+
+    auto res = BuildPathsToSuspiciousInstructions(obj.second.get());
     if (res.first && res.second) {
       return res;
     }
-
-    ClearData();
   }
+
+  return {};
+}
+
+std::pair<Value *, Instruction *> BOFChecker::BuildPathsToSuspiciousInstructions(MallocedObject *obj) {
+  Instruction *malloc = obj->getMallocCall();
+  Function *function = malloc->getFunction();
+  Instruction *strcpy = nullptr;
+  DFSOptions options;
+  options.terminationCondition = [&strcpy](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    if (IsCallWithName(currInst, CallInstruction::Strcpy)) {
+      strcpy = currInst;
+      return true;
+    }
+    return false;
+  };
+
+  DFSContext context{AnalyzerMap::ForwardFlowMap, malloc, options};
+  DFSResult result = DFS(context);
+  errs() << "TTTTTTTTTTTTT\n\tfound" << result.status << "\n";
+  errs() << *strcpy << "\n";
+  errs() << "-----111---------------------\n";
+  for (auto *e : result.path) {
+    errs() << *e << "\n";
+  }
+  errs() << "--------------------------\n";
 
   return {};
 }

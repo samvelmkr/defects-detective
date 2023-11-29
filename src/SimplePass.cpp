@@ -105,6 +105,7 @@ void SimplePass::analyze(Module &M) {
     GenSarif.save();
     return;
   }
+  errs() << "EEEEEEEEEEEEEEEEEEee\n";
 
   auto uafLoc = analyzer->UAFCheck();
   if (uafLoc) {
@@ -114,6 +115,7 @@ void SimplePass::analyze(Module &M) {
     GenSarif.save();
     return;
   }
+  errs() << "EEEEEEEEEEEEEEEEEEee\n";
 
   auto bofLoc = analyzer->BOFCheck();
   if (bofLoc) {
@@ -123,6 +125,7 @@ void SimplePass::analyze(Module &M) {
     GenSarif.save();
     return;
   }
+  errs() << "EEEEEEEEEEEEEEEEEEee\n";
 
   GenSarif.save();
 }

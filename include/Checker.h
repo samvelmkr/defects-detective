@@ -18,6 +18,7 @@ struct DFSContext {
 
 struct DFSResult {
   bool status = false;
+  std::vector<Value*> path;
 };
 
 class Checker {
@@ -31,7 +32,12 @@ private:
                                            CallInstruction::Srand,
                                            CallInstruction::Rand,
                                            CallInstruction::Printf,
-                                           CallInstruction::Snprintf};
+                                           CallInstruction::Snprintf,
+                                           CallInstruction::Memset,
+                                           CallInstruction::Strcpy,
+                                           CallInstruction::Fopen,
+                                           CallInstruction::Fprint,
+  };
 
   bool IsLibraryFunction(Value *inst);
 protected:
@@ -42,7 +48,7 @@ public:
   Checker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
 
   // TODO: later change the name
-  DFSResult DFSTraverse(Function* function, const DFSContext &context,
+  DFSResult DFSTraverse(Function *function, const DFSContext &context,
                         std::unordered_set<Value *> &visitedNodes);
 
   DFSResult DFS(const DFSContext &context);
@@ -66,10 +72,10 @@ public:
 
   bool HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
 
-  Instruction *FindInstWithType(Function *function, AnalyzerMap mapID, Instruction* start,
+  Instruction *FindInstWithType(Function *function, AnalyzerMap mapID, Instruction *start,
                                 const std::function<bool(Instruction *)> &typeCond);
 
-  std::vector<Instruction *> CollectAllInstsWithType(Function *function, AnalyzerMap mapID, Instruction* start,
+  std::vector<Instruction *> CollectAllInstsWithType(Function *function, AnalyzerMap mapID, Instruction *start,
                                                      const std::function<bool(Instruction *)> &typeCond);
 
   Instruction *GetDeclaration(Instruction *inst);
