@@ -74,39 +74,25 @@ bool MLChecker::HasMallocFreePathWithOffset(MallocedObject *obj, Instruction *fr
   return result.status;
 }
 
-bool MLChecker::IsNullMallocedInst(std::vector<Value *> &path, Instruction *inst) {
-  Instruction *operand = GetCmpNullOperand(inst);
-  if (!operand) {
-    return false;
-  }
-
-  auto *malloc = dyn_cast<Instruction>(path.front());
-  if (!HasPath(AnalyzerMap::BackwardDependencyMap, operand, malloc)) {
-    return false;
-  }
-
-  auto it = std::find(path.begin(), path.end(), inst);
-  auto *br = dyn_cast<BranchInst>(*(++it));
-  Value *Condition = br->getCondition();
-
-  if (it + 1 == path.end()) {
-    return false;
-  }
-
-  auto *iCmp = dyn_cast<ICmpInst>(inst);
-  ICmpInst::Predicate predicate = iCmp->getPredicate();
-
-  if (br->isConditional() && br->getNumSuccessors() == 2) {
-    auto *trueBr = br->getSuccessor(0);
-    auto *falseBr = br->getSuccessor(1);
-    auto *next = dyn_cast<Instruction>(*(++it));
-    if ((predicate == CmpInst::ICMP_EQ && next->getParent() == trueBr) ||
-        (predicate == CmpInst::ICMP_NE && next->getParent() == falseBr)) {
-      return true;
-    }
-  }
-  return false;
-}
+// TODO: improve this
+//ICmpInst::Predicate MLChecker::GetPredicateNullMallocedInst(Instruction *inst) {
+//  auto *br = dyn_cast<BranchInst>(inst->getNextNonDebugInstruction());
+//
+//  auto *iCmp = dyn_cast<ICmpInst>(inst);
+//  return
+//
+//  if (br->isConditional() && br->getNumSuccessors() == 2) {
+//    auto *trueBr = br->getSuccessor(0);
+//    auto *falseBr = br->getSuccessor(1);
+//
+//    auto *next = dyn_cast<Instruction>(*(++it));
+//    if ((predicate == CmpInst::ICMP_EQ && next->getParent() == trueBr) ||
+//        (predicate == CmpInst::ICMP_NE && next->getParent() == falseBr)) {
+//      return true;
+//    }
+//  }
+//  return false;
+//}
 
 bool MLChecker::HasSwitchWithFreeCall(llvm::Function *function) {
   for (BasicBlock &bb : *function) {
@@ -127,20 +113,15 @@ bool MLChecker::HasSwitchWithFreeCall(llvm::Function *function) {
   return false;
 }
 
+// TODO: rename
 bool MLChecker::FunctionCallDeallocation(CallInst *call) {
   Function *calledFunction = call->getCalledFunction();
 
   if (calledFunction->isDeclarationForLinker() || IsLibraryFunction(call)) {
     return false;
   }
-  if (HasSwitchWithFreeCall(calledFunction)) {
-    return true;
-  }
 
-//  FuncInfo *funcInfo = funcInfos[calledFunction].get();
-//  CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
-
-  return false;
+  return HasSwitchWithFreeCall(calledFunction);
 }
 
 std::pair<Instruction *, Instruction *> MLChecker::CheckFreeExistence(std::vector<Value *> &path) {
@@ -155,10 +136,10 @@ std::pair<Instruction *, Instruction *> MLChecker::CheckFreeExistence(std::vecto
       continue;
     }
     auto *inst = dyn_cast<Instruction>(val);
-    if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
-      // Malloced instruction value is null. No need free call on this path.
-      return {};
-    }
+//    if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
+//      // Malloced instruction value is null. No need free call on this path.
+//      return {};
+//    }
 
     if (auto *callInst = dyn_cast<CallInst>(inst)) {
       if (FunctionCallDeallocation(callInst)) {
@@ -227,6 +208,8 @@ std::pair<Instruction *, Instruction *> MLChecker::CheckFreeExistence(std::vecto
 //  DFSResult result = DFS(context);
 //}
 
+
+
 std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 
   auto mallocCalls = FindAllMallocCalls(function);
@@ -237,17 +220,20 @@ std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 
   for (Instruction *malloc : mallocCalls) {
     errs() << "\tmalloc " << *malloc << "\n";
-
+    auto res = FindMemleak(malloc);
+    if (res.first && res.second) {
+      return res;
+    }
   }
 
-  for (Instruction *malloc : mallocCalls) {
-    FuncInfo *funcInfo = funcInfos[malloc->getFunction()].get();
-    CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
-  }
-
-  for (auto &path : allMallocRetPaths) {
-    ProcessTermInstOfPath(path);
-  }
+//  for (Instruction *malloc : mallocCalls) {
+//    FuncInfo *funcInfo = funcInfos[malloc->getFunction()].get();
+//    CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
+//  }
+//
+//  for (auto &path : allMallocRetPaths) {
+//    ProcessTermInstOfPath(path);
+//  }
 
 //  errs() << "NUM of PATHs" << allMallocRetPaths.size() << "\n";
 //  for (const auto &path : allMallocRetPaths) {
@@ -257,12 +243,12 @@ std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 //    errs() << "\n";
 //  }
 
-  for (auto &path : allMallocRetPaths) {
-    std::pair<Instruction *, Instruction *> mlTrace = CheckFreeExistence(path);
-    if (mlTrace.first && mlTrace.second) {
-      return mlTrace;
-    }
-  }
+//  for (auto &path : allMallocRetPaths) {
+//    std::pair<Instruction *, Instruction *> mlTrace = CheckFreeExistence(path);
+//    if (mlTrace.first && mlTrace.second) {
+//      return mlTrace;
+//    }
+//  }
 
   return {};
 }
@@ -272,6 +258,99 @@ std::vector<Instruction *> MLChecker::FindAllMallocCalls(Function *function) {
                                  [](Instruction *inst) {
                                    return IsCallWithName(inst, CallInstruction::Malloc);
                                  });
+}
+
+std::pair<Value *, Instruction *> MLChecker::FindMemleak(Instruction *malloc) {
+  Function *function = malloc->getFunction();
+  Instruction *start = &*function->getEntryBlock().begin();
+  FuncInfo *funcInfo = funcInfos[function].get();
+  Instruction *end = funcInfo->getRet();
+
+  bool mallocWithOffset = funcInfo->mallocedObjs[malloc]->isMallocedWithOffset();
+
+  DFSOptions options;
+
+  options.terminationCondition = [&end](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    if (currInst == end) {
+      return true;
+    }
+
+    return false;
+  };
+
+  ICmpInst::Predicate predicate = {};
+  BranchInst* nullCmpBr = nullptr;
+
+  options.continueCondition = [malloc, this, &funcInfo, &mallocWithOffset, &predicate, &nullCmpBr](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    // Malloced instruction value is null. No need free call on this path.
+    if (auto *iCmp = dyn_cast<ICmpInst>(currInst)) {
+      if(Instruction *operand = GetCmpNullOperand(currInst)) {
+        if (HasPath(AnalyzerMap::ForwardDependencyMap, malloc, operand)) {
+          nullCmpBr = dyn_cast<BranchInst>(currInst->getNextNonDebugInstruction());
+          if (nullCmpBr->isConditional() && nullCmpBr->getNumSuccessors() == 2) {
+            predicate = iCmp->getPredicate();
+          }
+        }
+      }
+    }
+    if (predicate) {
+      auto *trueBr = nullCmpBr->getSuccessor(0);
+      auto *falseBr = nullCmpBr->getSuccessor(1);
+      if ((predicate == CmpInst::ICMP_EQ && currInst->getParent() == trueBr) ||
+          (predicate == CmpInst::ICMP_NE && currInst->getParent() == falseBr)) {
+        return true;
+      }
+    }
+
+
+    if (auto *callInst = dyn_cast<CallInst>(currInst)) {
+      if (FunctionCallDeallocation(callInst)) {
+        return true;
+      }
+    }
+
+    if (IsCallWithName(currInst, CallInstruction::Free)) {
+      if ((mallocWithOffset && HasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), currInst))
+          || (HasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), currInst))) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+
+  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSResult result = DFS(context);
+
+  if (!result.status) {
+    return {};
+  }
+
+  std::vector<Value *> path = result.path;
+  ProcessTermInstOfPath(path);
+
+  auto *endInst = dyn_cast<Instruction>(path.back());
+  if (mallocWithOffset) {
+    MallocedObject *main = funcInfo->mallocedObjs[malloc]->getMainObj();
+    if (main->isDeallocated()) {
+      // FIXME: take free corresponding to path
+      endInst = main->getFreeCalls().front();
+    }
+  }
+  return {malloc, endInst};
+
 }
 
 } // namespace llvm

@@ -7,25 +7,27 @@ namespace llvm {
 
 class MLChecker : public Checker {
 
-  std::vector<std::vector<Value*>> allMallocRetPaths = {};
+  std::vector<std::vector<Value *>> allMallocRetPaths = {};
 
   // Malloced instruction value is null.
-  bool IsNullMallocedInst(std::vector<Value *> &path, Instruction* icmp);
+  ICmpInst::Predicate GetPredicateNullMallocedInst(Instruction *icmp);
 
-  bool HasMallocFreePath(MallocedObject* obj, Instruction* free);
+  bool HasMallocFreePath(MallocedObject *obj, Instruction *free);
   bool HasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free);
   std::pair<Instruction *, Instruction *> CheckFreeExistence(std::vector<Value *> &path);
 
-  std::vector<Instruction* > FindAllMallocCalls(Function* function);
+  std::vector<Instruction *> FindAllMallocCalls(Function *function);
 
-  bool FunctionCallDeallocation(CallInst* call);
+  bool FunctionCallDeallocation(CallInst *call);
 
-  bool HasSwitchWithFreeCall(Function* function);
+  bool HasSwitchWithFreeCall(Function *function);
+
+  std::pair<Value *, Instruction *> FindMemleak(Instruction* malloc);
 
 public:
 
   MLChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
-  std::pair<Value *, Instruction *> Check(Function* function) override;
+  std::pair<Value *, Instruction *> Check(Function *function) override;
 };
 
 } // namespace llvm
