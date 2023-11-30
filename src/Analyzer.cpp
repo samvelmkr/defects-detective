@@ -61,11 +61,9 @@ std::shared_ptr<BugTrace> Analyzer::UAFCheck() {
 
 std::shared_ptr<BugTrace> Analyzer::BOFCheck() {
   std::shared_ptr<BOFChecker> bofChecker = std::make_shared<BOFChecker>(funcInfos);
-  for (auto currentFunc : funcQueue) {
-    auto trace = bofChecker->Check(currentFunc);
-    if (trace.first && trace.second) {
-      return std::make_shared<BugTrace>(trace, BugType::BufferOverFlow);
-    }
+  auto trace = bofChecker->Check(mainFunc);
+  if (trace.first && trace.second) {
+    return std::make_shared<BugTrace>(trace, BugType::BufferOverFlow);
   }
   return {nullptr};
 }

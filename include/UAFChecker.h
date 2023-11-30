@@ -9,9 +9,10 @@ class UAFChecker : public Checker {
 
   std::vector<std::vector<Instruction*>> allMallocRetPaths = {};
 
+  Instruction* FindUseAfterFree(Instruction* inst);
+
 public:
   UAFChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
-  bool isUseAfterFree(Instruction* inst);
   std::pair<Value *, Instruction *> Check(Function* function) override;
 };
 

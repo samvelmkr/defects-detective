@@ -180,6 +180,12 @@ bool FuncInfo::ProcessStoreInsts(Instruction *storeInst) {
 bool FuncInfo::ProcessGepInsts(Instruction *gInst) {
   auto *gepInst = dyn_cast<GetElementPtrInst>(gInst);
   auto *firstOp = dyn_cast<Instruction>(gepInst->getOperand(0));
+
+  // TODO: check this later
+  if (backwardDependencyMap.find(firstOp) == backwardDependencyMap.end()) {
+    return false;
+  }
+
   // Go up to the 'alloca' instruction
   for (Value *predecessorVal : backwardDependencyMap.at(firstOp)) {
     auto predecessorInst = dyn_cast<Instruction>(predecessorVal);
