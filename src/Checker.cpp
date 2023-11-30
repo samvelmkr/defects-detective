@@ -27,19 +27,31 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
   auto *map = funcInfo->SelectMap(context.mapID);
   std::stack<Value *> dfsStack;
   dfsStack.push(context.start);
+//  result.path.push_back(context.start);
+
   Value *previous = nullptr;
 
   while (!dfsStack.empty()) {
     Value *current = dfsStack.top();
     dfsStack.pop();
 
-    if (visitedNodes.find(current) != visitedNodes.end()) {
-      // Already visited this instruction
-      continue;
-    }
+    result.path.push_back(current);
+    visitedNodes.insert(current);
+
+//    errs() << "-----111---------------------\n";
+//    for (auto *e : result.path) {
+//      errs() << *e << "\n";
+//    }
+////    errs() << "Visited\n{ ";
+////    for (auto* val : visitedNodes) {
+////      errs() << *val << ", ";
+////    }
+////    errs() << " }\n";
+//    errs() << "--------------------------\n";
 
     if (context.options.terminationCondition &&
         context.options.terminationCondition(current)) {
+
       result.status = true;
       return result;
     }
@@ -52,8 +64,6 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
     if (map->operator[](current).empty()) {
       // change path
     }
-
-    visitedNodes.insert(current);
 
     // Check if the current instruction is a call instruction
     if (auto *callInst = dyn_cast<CallInst>(current)) {
@@ -80,20 +90,38 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
           DFSContext newContext{context.mapID, nextStart, context.options};
 
           // Recursively traverse the called function
-          DFSTraverse(calledFunction, newContext, visitedNodes);
-          // Process results from the called function if needed
-          // ...
+          DFSResult calledFunctionResult = DFSTraverse(calledFunction, newContext, visitedNodes);
 
-          // May be need to combine results from the called function with the main result
-          // result.combine(calledFunctionResult);
+          // Process results
+          if (calledFunctionResult.status) {
+             result.combine(calledFunctionResult);
+             return result;
+          }
         }
       }
     }
     previous = current;
 
+    // Todo: Perhaps, instead of this, store set of finished insts
+
+    bool noChildToTraverse = true;
     for (Value *next : map->operator[](current)) {
       if (visitedNodes.find(next) == visitedNodes.end()) {
         dfsStack.push(next);
+        noChildToTraverse = false;
+      }
+    }
+
+    while (noChildToTraverse) {
+      result.path.pop_back();
+      if(result.path.empty()) {
+        break;
+      }
+      Value* last = result.path.back();
+      for (Value *next : map->operator[](last)) {
+        if (visitedNodes.find(next) == visitedNodes.end()) {
+          noChildToTraverse = false;
+        }
       }
     }
 

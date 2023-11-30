@@ -118,6 +118,10 @@ struct CallInstruction {
   static const std::string Rand;
   static const std::string Printf;
   static const std::string Snprintf;
+  static const std::string Memset;
+  static const std::string Strcpy;
+  static const std::string Fopen;
+  static const std::string Fprint;
 };
 
 class CallDataDepInfo {

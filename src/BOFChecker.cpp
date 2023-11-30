@@ -221,6 +221,12 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
     }
 
   } else if (auto *load = dyn_cast<LoadInst>(inst)) {
+    // TODO: validate later ?
+    //  %x = load gep
+    if (!load->getPointerOperand()->hasName()) {
+      return;
+    }
+
     if (!inst->hasName()) {
       inst->setName("var" + std::to_string(++numOfVariables));
     }
@@ -242,6 +248,13 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
         variableValues[op1->getName().str()]->val[0] - constValue->getSExtValue();
 
   } else if (inst->getOpcode() == Instruction::SExt || inst->getOpcode() == Instruction::BitCast) {
+    // TODO: validate later ?
+    //  %x = load gep
+    //  %y = sext %x
+    if (!inst->getOperand(0)->hasName()) {
+      return;
+    }
+
     if (!inst->hasName()) {
       inst->setName("var" + std::to_string(++numOfVariables));
     }
@@ -252,10 +265,17 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
     if (!isa<Instruction>(gep->getPointerOperand())) {
       return;
     }
+
     size_t offset = GetGepOffset(gep);
     std::string gepName = GetGepVarName(gep);
 
-    // Todo: later get size from malloc or alloca if type is array
+    // TODO: validate later ?
+    //  process later (gep from global)
+    if (gepName.empty()) {
+      return;
+    }
+
+    // Todo: later get size from malloc or alloca if type is array : Done
     if (variableValues[gepName]->val.size() < offset + 1) {
       variableValues[gepName]->val.resize(offset + 1, 0);
     }
@@ -400,7 +420,7 @@ std::pair<Value *, Instruction *> BOFChecker::DetectOutOfBoundAccess(MallocedObj
     ValueAnalysis(currInst);
 //    errs() << "inst:" << *currInst << "\n";
 //    printVA();
-    errs() << "\n";
+//    errs() << "\n";
     if (currInst == malloc) {
       mallocSize = GetMallocedSize(malloc);
     }
@@ -462,15 +482,115 @@ std::pair<Value *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *
 
   FuncInfo *funcInfo = funcInfos[function].get();
   for (auto &obj : funcInfo->mallocedObjs) {
-//    if (geps.empty()) {
-//      continue;
-//    }
+
     auto res = DetectOutOfBoundAccess(obj.second.get());
     if (res.first && res.second) {
       return res;
     }
 
     ClearData();
+
+    res = BuildPathsToSuspiciousInstructions(obj.second.get());
+    if (res.first && res.second) {
+      return res;
+    }
+  }
+
+  return {};
+}
+
+std::pair<Value *, Instruction *> BOFChecker::StrcpyValidation(Instruction *strcpyInst) {
+  if (auto *callInst = dyn_cast<CallInst>(strcpyInst)) {
+    Function *calledFunction = callInst->getCalledFunction();
+    if (calledFunction && calledFunction->getName() == CallInstruction::Strcpy) {
+      if (callInst->getNumArgOperands() == 2) {
+
+        uint64_t destSize = 0;
+        uint64_t sourceSize = 0;
+
+        Value *destArg = callInst->getArgOperand(0)->stripPointerCasts();
+        if (auto *globalVar = dyn_cast<GlobalVariable>(destArg)) {
+          if (auto *arrayType = dyn_cast<ArrayType>(globalVar->getValueType())) {
+            destSize = arrayType->getNumElements();
+          }
+        }
+
+        Value *sourceArg = callInst->getOperand(1);
+        if (auto *sourceInst = dyn_cast<Instruction>(sourceArg)) {
+          if (sourceInst->hasName() && !variableValues.empty() &&
+              variableValues.find(sourceInst->getName().str()) == variableValues.end()) {
+            return {};
+          }
+          sourceSize = variableValues[sourceInst->getName().str()]->size;
+        }
+        if (sourceSize > destSize ) {
+          return {destArg, strcpyInst};
+        }
+      }
+    }
+  }
+  return {};
+}
+
+std::pair<Value *, Instruction *> BOFChecker::BuildPathsToSuspiciousInstructions(MallocedObject *obj) {
+
+  // strcpy validation
+  Instruction *malloc = obj->getMallocCall();
+  Function *function = malloc->getFunction();
+  Instruction *start = &*function->getEntryBlock().begin();
+
+  Instruction *strcpy = nullptr;
+  DFSOptions options;
+  options.terminationCondition = [&strcpy](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    if (IsCallWithName(currInst, CallInstruction::Strlen)) {
+      return true;
+    }
+
+    if (IsCallWithName(currInst, CallInstruction::Strcpy)) {
+      strcpy = currInst;
+      return true;
+    }
+    return false;
+  };
+
+  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSResult result = DFS(context);
+  if (!result.status || !strcpy) {
+    return {};
+  }
+
+//  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+//  errs() << "-----1144---------------------\n";
+//  for (auto *e : result.path) {
+//    errs() << *e << "\n";
+//  }
+////    errs() << "Visited\n{ ";
+////    for (auto* val : visitedNodes) {
+////      errs() << *val << ", ";
+////    }
+////    errs() << " }\n";
+//  errs() << "--------------------------\n";
+
+  for (auto *val : result.path) {
+    // process arguments?
+    if (!isa<Instruction>(val)) {
+      continue;
+    }
+    auto *currInst = dyn_cast<Instruction>(val);
+//    errs() << "inst:" << *currInst << "\n";
+    ValueAnalysis(currInst);
+//    errs() << "inst:" << *currInst << "\n";
+//    printVA();
+  }
+  auto res = StrcpyValidation(strcpy);
+  if (res.first && res.second) {
+    ClearData();
+    return res;
   }
 
   return {};
