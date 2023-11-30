@@ -247,7 +247,30 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
     variableValues[inst->getName().str()]->val[0] =
         variableValues[op1->getName().str()]->val[0] - constValue->getSExtValue();
 
-  } else if (inst->getOpcode() == Instruction::SExt || inst->getOpcode() == Instruction::BitCast) {
+  } else if (inst->getOpcode() == Instruction::Add) {
+    auto *op1 = dyn_cast<Instruction>(inst->getOperand(0));
+    Value *op2Val = inst->getOperand(1);
+    if (isa<ConstantInt>(op2Val)) {
+      auto *constValue = dyn_cast<ConstantInt>(op2Val);
+      if (!inst->hasName()) {
+        inst->setName("var" + std::to_string(++numOfVariables));
+      }
+      CreateNewVar(inst->getName().str());
+      variableValues[inst->getName().str()]->val[0] =
+          variableValues[op1->getName().str()]->val[0] + constValue->getSExtValue();
+
+    } else if (auto *op2 = dyn_cast<Instruction>(op2Val)) {
+      if (!inst->hasName()) {
+        inst->setName("var" + std::to_string(++numOfVariables));
+      }
+      CreateNewVar(inst->getName().str());
+      variableValues[inst->getName().str()]->val[0] = variableValues[op1->getName().str()]->val[0] +
+          variableValues[op2->getName().str()]->val[0];
+
+    }
+  } else if (inst->getOpcode() == Instruction::SExt ||
+      inst->getOpcode() == Instruction::ZExt ||
+      inst->getOpcode() == Instruction::BitCast) {
     // TODO: validate later ?
     //  %x = load gep
     //  %y = sext %x
@@ -351,9 +374,18 @@ bool BOFChecker::IsBOFGep(GetElementPtrInst *gep, size_t mallocSize) {
   FuncInfo *funcInfo = funcInfos[gep->getFunction()].get();
   std::shared_ptr<LoopsInfo> loopInfo = funcInfo->GetLoopInfo();
   if (loopInfo && loopInfo->HasInst(dyn_cast<Instruction>(gep))) {
-    return AccessToOutOfBoundInCycle(gep, mallocSize);
+    if (AccessToOutOfBoundInCycle(gep, mallocSize)) {
+      return true;
+    }
   }
-  return mallocSize <= GetGepOffset(gep);
+//  return mallocSize <= GetGepOffset(gep);
+
+  //experimantal
+  if (mallocSize <= GetGepOffset(gep) &&
+      gep->getNextNonDebugInstruction()->getOpcode() == Instruction::Store) {
+    return true;
+  }
+  return false;
 }
 
 std::pair<Value *, Instruction *> BOFChecker::FindBOFInst(Instruction *inst,
@@ -361,11 +393,20 @@ std::pair<Value *, Instruction *> BOFChecker::FindBOFInst(Instruction *inst,
                                                           const std::vector<Instruction *> &geps,
                                                           const std::vector<Instruction *> &memcpies) {
   // Analyse geps
-  if (inst->getOpcode() == Instruction::GetElementPtr &&
-      std::find(geps.begin(), geps.end(), inst) != geps.end()) {
+  if (inst->getOpcode() == Instruction::GetElementPtr) { //} &&
+//      std::find(geps.begin(), geps.end(), inst) != geps.end()) {
     auto *gepInst = dyn_cast<GetElementPtrInst>(inst);
     if (IsBOFGep(gepInst, mallocSize)) {
-      return {malloc, inst};
+      Instruction *store = inst->getNextNonDebugInstruction();
+      Instruction *load = store->getNextNonDebugInstruction();
+      Instruction *usage = nullptr;
+      if (load->getOpcode() != Instruction::Load ||
+          load->getType()->isPointerTy()) {
+        usage = store;
+      } else {
+        usage = load;
+      }
+      return {malloc, usage};
     }
   }
   // Analyse memcpies
@@ -462,8 +503,10 @@ std::pair<Value *, Instruction *> BOFChecker::OutOfBoundFromArray(Instruction *i
                                                alloca, [](Instruction *curr) {
         return IsCallWithName(curr, CallInstruction::Snprintf);
       });
-
-  return SnprintfCallValidation(inst, snprintfInst);
+  if (snprintfInst) {
+    return SnprintfCallValidation(inst, snprintfInst);
+  }
+  return {};
 }
 
 std::pair<Value *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *function) {
@@ -494,6 +537,7 @@ std::pair<Value *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *
     if (res.first && res.second) {
       return res;
     }
+
   }
 
   return {};
@@ -523,7 +567,7 @@ std::pair<Value *, Instruction *> BOFChecker::StrcpyValidation(Instruction *strc
           }
           sourceSize = variableValues[sourceInst->getName().str()]->size;
         }
-        if (sourceSize > destSize ) {
+        if (sourceSize > destSize) {
           return {destArg, strcpyInst};
         }
       }
@@ -634,6 +678,9 @@ Instruction *BOFChecker::MemcpyValidation(Instruction *mcInst) {
 }
 
 std::pair<Value *, Instruction *> BOFChecker::SnprintfCallValidation(Instruction *inst, Instruction *snprintInst) {
+  if (!isa<CallInst>(snprintInst)) {
+    return {};
+  }
   auto *call = dyn_cast<CallInst>(snprintInst);
   Value *bufVal = call->getOperand(0)->stripPointerCasts();
   Value *sizeVal = call->getOperand(1);
