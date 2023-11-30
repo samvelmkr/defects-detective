@@ -416,8 +416,8 @@ bool FuncInfo::DetectLoopsUtil(Function *f, BasicBlock *BB, std::unordered_set<B
 
       // If the successor is in the recursion stack, it is a back edge, indicating a loop
     else if (recStack.find(succ) != recStack.end()) {
-      errs() << "Loop detected in function " << f->getName() << ":\n";
-      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
+//      errs() << "Loop detected in function " << f->getName() << ":\n";
+//      errs() << "  From: " << *BB->getTerminator() << "  To: " << *succ->getFirstNonPHIOrDbg() << "\n";
       auto *latch = dyn_cast<Instruction>(BB->getTerminator());
       if (latch->getOpcode() != Instruction::Br) {
         continue;
