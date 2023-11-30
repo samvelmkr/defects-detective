@@ -128,13 +128,19 @@ bool MLChecker::HasSwitchWithFreeCall(llvm::Function *function) {
 }
 
 bool MLChecker::FunctionCallDeallocation(CallInst *call) {
-  Function *function = call->getCalledFunction();
+  Function *calledFunction = call->getCalledFunction();
 
-  if (function->isDeclarationForLinker() || IsLibraryFunction(call)) {
+  if (calledFunction->isDeclarationForLinker() || IsLibraryFunction(call)) {
     return false;
   }
+  if (HasSwitchWithFreeCall(calledFunction)) {
+    return true;
+  }
 
-  return HasSwitchWithFreeCall(function);
+//  FuncInfo *funcInfo = funcInfos[calledFunction].get();
+//  CollectPaths(malloc, funcInfo->getRet(), allMallocRetPaths);
+
+  return false;
 }
 
 std::pair<Instruction *, Instruction *> MLChecker::CheckFreeExistence(std::vector<Value *> &path) {
@@ -186,11 +192,52 @@ std::pair<Instruction *, Instruction *> MLChecker::CheckFreeExistence(std::vecto
   return {};
 }
 
+//void MLChecker::MLTraverse(Instruction *inst) {
+//  Function *function = inst->getFunction();
+//  Instruction *start = &*function->getEntryBlock().begin();
+//  FuncInfo *funcInfo = funcInfos[function].get();
+//  Instruction *end = funcInfo->getRet();
+//  DFSOptions options;
+//
+//  options.terminationCondition = [&end, this](Value *curr) {
+//    if (!isa<Instruction>(curr)) {
+//      return false;
+//    }
+//    auto *currInst = dyn_cast<Instruction>(curr);
+//
+//    if (currInst == end) {
+//      errs() << "-----1144---------------------\n";
+//      for (auto *e : result.path) {
+//        errs() << *e << "\n";
+//      }
+////    errs() << "Visited\n{ ";
+////    for (auto* val : visitedNodes) {
+////      errs() << *val << ", ";
+////    }
+////    errs() << " }\n";
+//      errs() << "--------------------------\n";
+//    }
+//
+//    return false;
+//  };
+//
+//  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+//
+//  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+//  DFSResult result = DFS(context);
+//}
+
 std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 
   auto mallocCalls = FindAllMallocCalls(function);
   if (mallocCalls.empty()) {
     return {};
+  }
+  errs() << "NUM of mallocs " << mallocCalls.size() << "\n";
+
+  for (Instruction *malloc : mallocCalls) {
+    errs() << "\tmalloc " << *malloc << "\n";
+
   }
 
   for (Instruction *malloc : mallocCalls) {

@@ -285,6 +285,56 @@ size_t Checker::GetArraySize(AllocaInst *pointerArray) {
   return 0;
 }
 
+void Checker::CollectAllPaths(Instruction *start, Instruction *end,
+                              std::vector<std::vector<Value *>> &allPaths) {
+
+  std::unordered_set<Value *> visitedNodes;
+  std::vector<Value *> currentPath;
+  Function *function = start->getFunction();
+  FindPaths(visitedNodes, allPaths, currentPath, start, end, function);
+
+  Instruction *malloc = obj->getMallocCall();
+  Function *function = malloc->getFunction();
+  Instruction *start = &*function->getEntryBlock().begin();
+
+  Instruction *strcpy = nullptr;
+  DFSOptions options;
+  options.terminationCondition = [&strcpy](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    if (IsCallWithName(currInst, CallInstruction::Strlen)) {
+      return true;
+    }
+
+    if (IsCallWithName(currInst, CallInstruction::Strcpy)) {
+      strcpy = currInst;
+      return true;
+    }
+    return false;
+  };
+
+  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSResult result = DFS(context);
+  if (!result.status || !strcpy) {
+    return {};
+  }
+
+    errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+  errs() << "-----1144---------------------\n";
+  for (auto *e : result.path) {
+    errs() << *e << "\n";
+  }
+//    errs() << "Visited\n{ ";
+//    for (auto* val : visitedNodes) {
+//      errs() << *val << ", ";
+//    }
+//    errs() << " }\n";
+  errs() << "--------------------------\n";
+}
+
 //std::vector<std::vector<Instruction *>> Checker::CollectAllPaths(Instruction *start, Instruction *end) {
 //  std::vector<std::vector<Instruction *>> allPaths;
 //  std::unordered_set<Instruction *> visitedInstructions;

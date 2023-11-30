@@ -21,6 +21,7 @@ class MLChecker : public Checker {
   bool FunctionCallDeallocation(CallInst* call);
 
   bool HasSwitchWithFreeCall(Function* function);
+
 public:
 
   MLChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);

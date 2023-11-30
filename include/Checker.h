@@ -18,7 +18,7 @@ struct DFSContext {
 
 struct DFSResult {
   bool status = false;
-  std::vector<Value*> path;
+  std::vector<Value *> path;
   void combine(const DFSResult &other) {
     path.insert(path.end(), other.path.begin(), other.path.end());
     status = status || other.status;
@@ -86,7 +86,8 @@ public:
 
   size_t GetArraySize(AllocaInst *pointerArray);
 
-//  std::vector<std::vector<Instruction *>> CollectAllPaths(Instruction *start, Instruction *end);
+  void CollectAllPaths(Instruction *start, Instruction *end,
+                       std::vector<std::vector<Value *>> &allPaths);
 //  void ExtractPaths(Instruction *current, Instruction *end,
 //                    std::unordered_set<Instruction *> &visited,
 //                    std::vector<Instruction *> &currentPath,
