@@ -249,11 +249,24 @@ void BOFChecker::ValueAnalysis(Instruction *inst) {
 
   } else if (inst->getOpcode() == Instruction::GetElementPtr) {
     auto *gep = dyn_cast<GetElementPtrInst>(inst);
+    errs() << "LLLL\n";
     if (!isa<Instruction>(gep->getPointerOperand())) {
       return;
     }
+    errs() << "LLLL\n";
+
     size_t offset = GetGepOffset(gep);
+    errs() << "LLLL\n";
+
     std::string gepName = GetGepVarName(gep);
+    errs() << "LLLL\n";
+
+
+    // process later (gep from global)
+    errs() << gepName.empty() << " | <"  << gepName << ">\n";
+    if (gepName.empty()) {
+      return;
+    }
 
     // Todo: later get size from malloc or alloca if type is array
     if (variableValues[gepName]->val.size() < offset + 1) {
@@ -481,9 +494,13 @@ std::pair<Value *, Instruction *> BOFChecker::OutOfBoundAccessChecker(Function *
   return {};
 }
 
+
+
 std::pair<Value *, Instruction *> BOFChecker::BuildPathsToSuspiciousInstructions(MallocedObject *obj) {
   Instruction *malloc = obj->getMallocCall();
   Function *function = malloc->getFunction();
+  Instruction *start = &*function->getEntryBlock().begin();
+
   Instruction *strcpy = nullptr;
   DFSOptions options;
   options.terminationCondition = [&strcpy](Value *curr) {
@@ -499,15 +516,41 @@ std::pair<Value *, Instruction *> BOFChecker::BuildPathsToSuspiciousInstructions
     return false;
   };
 
-  DFSContext context{AnalyzerMap::ForwardFlowMap, malloc, options};
+  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
   DFSResult result = DFS(context);
-  errs() << "TTTTTTTTTTTTT\n\tfound" << result.status << "\n";
-  errs() << *strcpy << "\n";
-  errs() << "-----111---------------------\n";
+  if (!result.status) {
+    return {};
+  }
+
+  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+  errs() << "-----1144---------------------\n";
   for (auto *e : result.path) {
     errs() << *e << "\n";
   }
+//    errs() << "Visited\n{ ";
+//    for (auto* val : visitedNodes) {
+//      errs() << *val << ", ";
+//    }
+//    errs() << " }\n";
   errs() << "--------------------------\n";
+
+  for (auto *val : result.path) {
+    // process arguments?
+    if (!isa<Instruction>(val)) {
+      continue;
+    }
+    auto *currInst = dyn_cast<Instruction>(val);
+    errs() << "inst:" << *currInst << "\n";
+    ValueAnalysis(currInst);
+    for (auto& pair : variableValues) {
+      if (pair.first.empty()) {
+        errs() << "66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666\n";
+      }
+    }
+    errs() << "inst:" << *currInst << "\n";
+    printVA();
+  }
+  ClearData();
 
   return {};
 }

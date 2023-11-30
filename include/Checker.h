@@ -19,6 +19,10 @@ struct DFSContext {
 struct DFSResult {
   bool status = false;
   std::vector<Value*> path;
+  void combine(const DFSResult &other) {
+    path.insert(path.end(), other.path.begin(), other.path.end());
+    status = status || other.status;
+  }
 };
 
 class Checker {

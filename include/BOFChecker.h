@@ -48,6 +48,7 @@ class BOFChecker : public Checker {
   Instruction *FindStrlenUsage(Instruction *alloca);
 
   std::pair<Value *, Instruction *> SnprintfCallValidation(Instruction *inst, Instruction *snprintInst);
+//  bool StrcpyValidation()
 
   std::pair<Value *, Instruction *> OutOfBoundFromArray(Instruction *inst);
 

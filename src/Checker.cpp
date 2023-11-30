@@ -38,21 +38,20 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
     result.path.push_back(current);
     visitedNodes.insert(current);
 
-    errs() << "-----111---------------------\n";
-    for (auto *e : result.path) {
-      errs() << *e << "\n";
-    }
-//    errs() << "Visited\n{ ";
-//    for (auto* val : visitedNodes) {
-//      errs() << *val << ", ";
+//    errs() << "-----111---------------------\n";
+//    for (auto *e : result.path) {
+//      errs() << *e << "\n";
 //    }
-//    errs() << " }\n";
-    errs() << "--------------------------\n";
+////    errs() << "Visited\n{ ";
+////    for (auto* val : visitedNodes) {
+////      errs() << *val << ", ";
+////    }
+////    errs() << " }\n";
+//    errs() << "--------------------------\n";
 
     if (context.options.terminationCondition &&
         context.options.terminationCondition(current)) {
 
-      result.path.push_back(current);
       result.status = true;
       return result;
     }
@@ -92,10 +91,12 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
 
           // Recursively traverse the called function
           DFSResult calledFunctionResult = DFSTraverse(calledFunction, newContext, visitedNodes);
-          // Process results from the called function if needed
-          // ...
-          // May be need to combine results from the called function with the main result
-          // result.combine(calledFunctionResult);
+
+          // Process results
+          if (calledFunctionResult.status) {
+             result.combine(calledFunctionResult);
+             return result;
+          }
         }
       }
     }
@@ -113,6 +114,9 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
 
     while (noChildToTraverse) {
       result.path.pop_back();
+      if(result.path.empty()) {
+        break;
+      }
       Value* last = result.path.back();
       for (Value *next : map->operator[](last)) {
         if (visitedNodes.find(next) == visitedNodes.end()) {
