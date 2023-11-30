@@ -5,7 +5,7 @@ namespace llvm {
 MLChecker::MLChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos)
     : Checker(funcInfos) {}
 
-bool MLChecker::hasMallocFreePath(MallocedObject *obj, Instruction *free) {
+bool MLChecker::HasMallocFreePath(MallocedObject *obj, Instruction *free) {
   DFSOptions options;
   options.terminationCondition = [obj, free](Value *curr) {
     if (!isa<Instruction>(curr)) {
@@ -32,7 +32,7 @@ bool MLChecker::hasMallocFreePath(MallocedObject *obj, Instruction *free) {
   return result.status;
 }
 
-bool MLChecker::hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free) {
+bool MLChecker::HasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free) {
   bool reachedFirstGEP = false;
   bool reachedAlloca = false;
   bool reachedSecondGEP = false;
@@ -108,7 +108,36 @@ bool MLChecker::IsNullMallocedInst(std::vector<Value *> &path, Instruction *inst
   return false;
 }
 
-std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vector<Value *> &path) {
+bool MLChecker::HasSwitchWithFreeCall(llvm::Function *function) {
+  for (BasicBlock &bb : *function) {
+    for (Instruction &i : bb) {
+      if (auto *switchInst = dyn_cast<SwitchInst>(&i)) {
+        BasicBlock *defaultBB = switchInst->getDefaultDest();
+        for (Instruction &defaultInst : *defaultBB) {
+          if (auto *call = dyn_cast<CallInst>(&defaultInst)) {
+            Function *calledFunction = call->getCalledFunction();
+            if (calledFunction && calledFunction->getName() == "free") {
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool MLChecker::FunctionCallDeallocation(CallInst *call) {
+  Function *function = call->getCalledFunction();
+
+  if (function->isDeclarationForLinker() || IsLibraryFunction(call)) {
+    return false;
+  }
+
+  return HasSwitchWithFreeCall(function);
+}
+
+std::pair<Instruction *, Instruction *> MLChecker::CheckFreeExistence(std::vector<Value *> &path) {
   auto *malloc = dyn_cast<Instruction>(path.front());
   FuncInfo *funcInfo = funcInfos[malloc->getFunction()].get();
 
@@ -116,20 +145,30 @@ std::pair<Instruction *, Instruction *> MLChecker::checkFreeExistence(std::vecto
   bool foundMallocFreePath = false;
 
   for (Value *val : path) {
-    if (auto *inst = dyn_cast<Instruction>(val)) {
-      if (IsCallWithName(inst, CallInstruction::Free)) {
-        if ((mallocWithOffset && hasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), inst))
-            || (hasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), inst))) {
-          foundMallocFreePath = true;
-          break;
-        }
-      }
+    if (!isa<Instruction>(val)) {
+      continue;
+    }
+    auto *inst = dyn_cast<Instruction>(val);
+    if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
+      // Malloced instruction value is null. No need free call on this path.
+      return {};
+    }
 
-      if (inst->getOpcode() == Instruction::ICmp && IsNullMallocedInst(path, inst)) {
-        // Malloced instruction value is null. No need free call on this path.
-        return {};
+    if (auto *callInst = dyn_cast<CallInst>(inst)) {
+      if (FunctionCallDeallocation(callInst)) {
+        foundMallocFreePath = true;
+        break;
       }
     }
+
+    if (IsCallWithName(inst, CallInstruction::Free)) {
+      if ((mallocWithOffset && HasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), inst))
+          || (HasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), inst))) {
+        foundMallocFreePath = true;
+        break;
+      }
+    }
+
   }
 
   if (!foundMallocFreePath) {
@@ -172,7 +211,7 @@ std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 //  }
 
   for (auto &path : allMallocRetPaths) {
-    std::pair<Instruction *, Instruction *> mlTrace = checkFreeExistence(path);
+    std::pair<Instruction *, Instruction *> mlTrace = CheckFreeExistence(path);
     if (mlTrace.first && mlTrace.second) {
       return mlTrace;
     }
@@ -182,7 +221,7 @@ std::pair<Value *, Instruction *> MLChecker::Check(Function *function) {
 }
 
 std::vector<Instruction *> MLChecker::FindAllMallocCalls(Function *function) {
-  return CollectAllInstsWithType(function, AnalyzerMap::ForwardFlowMap, &*function->getEntryBlock().begin(),
+  return CollectAllInstsWithType(AnalyzerMap::ForwardFlowMap, &*function->getEntryBlock().begin(),
                                  [](Instruction *inst) {
                                    return IsCallWithName(inst, CallInstruction::Malloc);
                                  });

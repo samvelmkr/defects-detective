@@ -11,13 +11,19 @@ class MLChecker : public Checker {
 
   // Malloced instruction value is null.
   bool IsNullMallocedInst(std::vector<Value *> &path, Instruction* icmp);
-public:
+
+  bool HasMallocFreePath(MallocedObject* obj, Instruction* free);
+  bool HasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free);
+  std::pair<Instruction *, Instruction *> CheckFreeExistence(std::vector<Value *> &path);
+
   std::vector<Instruction* > FindAllMallocCalls(Function* function);
 
+  bool FunctionCallDeallocation(CallInst* call);
+
+  bool HasSwitchWithFreeCall(Function* function);
+public:
+
   MLChecker(const std::unordered_map<Function *, std::shared_ptr<FuncInfo>> &funcInfos);
-  bool hasMallocFreePath(MallocedObject* obj, Instruction* free);
-  bool hasMallocFreePathWithOffset(MallocedObject *obj, Instruction *free);
-  std::pair<Instruction *, Instruction *> checkFreeExistence(std::vector<Value *> &path);
   std::pair<Value *, Instruction *> Check(Function* function) override;
 };
 

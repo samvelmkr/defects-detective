@@ -433,12 +433,13 @@ std::pair<Value *, Instruction *> BOFChecker::DetectOutOfBoundAccess(MallocedObj
   std::pair<Value *, Instruction *> bofTrace = {};
   size_t mallocSize = 0;
 
-  std::vector<Instruction *> geps = CollectAllInstsWithType(function, AnalyzerMap::ForwardDependencyMap, malloc,
+  // redundant
+  std::vector<Instruction *> geps = CollectAllInstsWithType(AnalyzerMap::ForwardDependencyMap, malloc,
                                                             [](Instruction *inst) {
                                                               return inst->getOpcode() == Instruction::GetElementPtr;
                                                             });
 
-  std::vector<Instruction *> memcpies = CollectAllInstsWithType(function, AnalyzerMap::ForwardDependencyMap, malloc,
+  std::vector<Instruction *> memcpies = CollectAllInstsWithType(AnalyzerMap::ForwardDependencyMap, malloc,
                                                                 [](Instruction *inst) {
                                                                   return IsCallWithName(inst, CallInstruction::Memcpy);
                                                                 });
@@ -499,7 +500,7 @@ std::pair<Value *, Instruction *> BOFChecker::OutOfBoundFromArray(Instruction *i
   uint64_t numElements = arrayType->getNumElements();
   outs() << "Number of elements: " << numElements << "\n";
 
-  Instruction *snprintfInst = FindInstWithType(alloca->getFunction(), AnalyzerMap::ForwardDependencyMap,
+  Instruction *snprintfInst = FindInstWithType(AnalyzerMap::ForwardDependencyMap,
                                                alloca, [](Instruction *curr) {
         return IsCallWithName(curr, CallInstruction::Snprintf);
       });
@@ -733,7 +734,7 @@ std::pair<Value *, Instruction *> BOFChecker::SnprintfCallValidation(Instruction
 Instruction *BOFChecker::FindBOFAfterWrongMemcpy(Instruction *mcInst) {
   Instruction *alloca = GetDeclaration(mcInst);
 
-  Instruction *bofInst = FindInstWithType(alloca->getFunction(), AnalyzerMap::ForwardDependencyMap,
+  Instruction *bofInst = FindInstWithType(AnalyzerMap::ForwardDependencyMap,
                                           alloca, [](Instruction *curr) {
         return IsCallWithName(curr, CallInstruction::Strlen);
       });

@@ -43,9 +43,9 @@ private:
                                            CallInstruction::Fprint,
   };
 
-  bool IsLibraryFunction(Value *inst);
 protected:
   std::unordered_map<Function *, std::shared_ptr<FuncInfo>> funcInfos;
+  bool IsLibraryFunction(Value *inst);
 
 public:
 
@@ -76,10 +76,10 @@ public:
 
   bool HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to);
 
-  Instruction *FindInstWithType(Function *function, AnalyzerMap mapID, Instruction *start,
+  Instruction *FindInstWithType(AnalyzerMap mapID, Instruction *start,
                                 const std::function<bool(Instruction *)> &typeCond);
 
-  std::vector<Instruction *> CollectAllInstsWithType(Function *function, AnalyzerMap mapID, Instruction *start,
+  std::vector<Instruction *> CollectAllInstsWithType(AnalyzerMap mapID, Instruction *start,
                                                      const std::function<bool(Instruction *)> &typeCond);
 
   Instruction *GetDeclaration(Instruction *inst);

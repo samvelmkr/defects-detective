@@ -216,7 +216,7 @@ bool Checker::HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
   return result.status;
 }
 
-Instruction *Checker::FindInstWithType(Function *function, AnalyzerMap mapID, Instruction *start,
+Instruction *Checker::FindInstWithType(AnalyzerMap mapID, Instruction *start,
                                        const std::function<bool(Instruction *)> &typeCond) {
   Instruction *res = nullptr;
   DFSOptions options;
@@ -237,7 +237,7 @@ Instruction *Checker::FindInstWithType(Function *function, AnalyzerMap mapID, In
   return res;
 }
 
-std::vector<Instruction *> Checker::CollectAllInstsWithType(Function *function, AnalyzerMap mapID, Instruction *start,
+std::vector<Instruction *> Checker::CollectAllInstsWithType(AnalyzerMap mapID, Instruction *start,
                                                             const std::function<bool(Instruction *)> &typeCond) {
   std::vector<Instruction *> results = {};
   DFSOptions options;
