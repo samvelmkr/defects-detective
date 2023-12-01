@@ -36,14 +36,17 @@ Instruction *UAFChecker::FindUseAfterFree(Instruction *inst) {
 }
 
 std::pair<Value *, Instruction *> UAFChecker::Check(Function *function) {
+  errs() << "RRRRRRRRRRRRRRRRRRRRr\n";
   FuncInfo *funcInfo = funcInfos[function].get();
 
   Instruction *useAfterFree = nullptr;
 
   for (auto &obj : funcInfo->mallocedObjs) {
+    errs() << "Malloc" << *obj.first << "\n";
     Instruction *malloc = obj.first;
     std::vector<Instruction *> freeInsts = obj.second->getFreeCalls();
     for (auto *free : freeInsts) {
+      errs() << "free" << "\n";
       DFSOptions options;
       options.terminationCondition = [malloc, free, &useAfterFree, this](Value *curr) {
         if (!isa<Instruction>(curr)) {

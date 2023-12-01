@@ -28,6 +28,10 @@ void Analyzer::AnalyzeFunctions() {
     funcQueue.push_back(current);
     funcInfos[current] = std::make_shared<FuncInfo>(current);
 
+    errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
+    funcInfos[current]->printMap(AnalyzerMap::ForwardDependencyMap);
+    errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
+
     visitedFunctions.insert(current);
     for (const auto &node : *callGraph->operator[](current)) {
       Function *next = node.second->getFunction();

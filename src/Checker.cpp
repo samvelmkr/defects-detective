@@ -38,26 +38,43 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
     result.path.push_back(current);
     visitedNodes.insert(current);
 
-//    errs() << "-----111---------------------\n";
-//    for (auto *e : result.path) {
-//      errs() << *e << "\n";
+    errs() << "-----111---------------------\n";
+    for (auto *e : result.path) {
+      errs() << *e << "\n";
+    }
+//    errs() << "Visited\n{ ";
+//    for (auto* val : visitedNodes) {
+//      errs() << *val << ", ";
 //    }
-////    errs() << "Visited\n{ ";
-////    for (auto* val : visitedNodes) {
-////      errs() << *val << ", ";
-////    }
-////    errs() << " }\n";
-//    errs() << "--------------------------\n";
+//    errs() << " }\n";
+    errs() << "--------------------------\n";
 
     if (context.options.terminationCondition &&
         context.options.terminationCondition(current)) {
+      errs() << "***************************TERM***************************\n";
 
       result.status = true;
+      result.funcsStats[function->getName().str()] = result.status;
       return result;
     }
 
     if (context.options.continueCondition &&
         context.options.continueCondition(current)) {
+      bool noChildToTraverse = true;
+      while (noChildToTraverse) {
+        result.path.pop_back();
+        if(result.path.empty()) {
+          break;
+        }
+        Value* last = result.path.back();
+        for (Value *next : map->operator[](last)) {
+          if (visitedNodes.find(next) == visitedNodes.end()) {
+            noChildToTraverse = false;
+          }
+        }
+      }
+
+      errs() << "CONTINUE\n";
       continue;
     }
 
@@ -93,8 +110,9 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
           DFSResult calledFunctionResult = DFSTraverse(calledFunction, newContext, visitedNodes);
 
           // Process results
+          result.combine(calledFunctionResult, calledFunction->getName().str());
+
           if (calledFunctionResult.status) {
-             result.combine(calledFunctionResult);
              return result;
           }
         }
@@ -127,6 +145,7 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
 
   }
   result.status = false;
+  result.funcsStats[function->getName().str()] = result.status;
   return result;
 }
 
@@ -213,6 +232,7 @@ bool Checker::HasPath(AnalyzerMap mapID, Instruction *from, Instruction *to) {
 
   DFSContext context{mapID, from, options};
   DFSResult result = DFS(context);
+  errs() << result.status << "Has path stat \n";
   return result.status;
 }
 

@@ -267,8 +267,13 @@ std::pair<Value *, Instruction *> MLChecker::FindMemleak(Instruction *malloc) {
   Instruction *end = funcInfo->getRet();
 
   bool mallocWithOffset = funcInfo->mallocedObjs[malloc]->isMallocedWithOffset();
+  errs() << "mallocWithOffset" << mallocWithOffset << "\n";
 
   DFSOptions options;
+
+  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
+  funcInfo->printMap(AnalyzerMap::ForwardDependencyMap);
+  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
 
   options.terminationCondition = [&end](Value *curr) {
     if (!isa<Instruction>(curr)) {
@@ -283,56 +288,84 @@ std::pair<Value *, Instruction *> MLChecker::FindMemleak(Instruction *malloc) {
     return false;
   };
 
-  ICmpInst::Predicate predicate = {};
-  BranchInst* nullCmpBr = nullptr;
+  bool pathWithNull = false;
+  Instruction *startOfPathWithNullValue = nullptr;
 
-  options.continueCondition = [malloc, this, &funcInfo, &mallocWithOffset, &predicate, &nullCmpBr](Value *curr) {
-    if (!isa<Instruction>(curr)) {
-      return false;
-    }
-    auto *currInst = dyn_cast<Instruction>(curr);
+  options.continueCondition =
+      [malloc, this, &funcInfo, &mallocWithOffset, &startOfPathWithNullValue, &pathWithNull](Value *curr) {
+        if (!isa<Instruction>(curr)) {
+          return false;
+        }
+        auto *currInst = dyn_cast<Instruction>(curr);
 
-    // Malloced instruction value is null. No need free call on this path.
-    if (auto *iCmp = dyn_cast<ICmpInst>(currInst)) {
-      if(Instruction *operand = GetCmpNullOperand(currInst)) {
-        if (HasPath(AnalyzerMap::ForwardDependencyMap, malloc, operand)) {
-          nullCmpBr = dyn_cast<BranchInst>(currInst->getNextNonDebugInstruction());
-          if (nullCmpBr->isConditional() && nullCmpBr->getNumSuccessors() == 2) {
-            predicate = iCmp->getPredicate();
+        // Malloced instruction value is null. No need free call on this path.
+        if (auto *iCmp = dyn_cast<ICmpInst>(currInst)) {
+          errs() << "***********************GetCmpNullOperand\n";
+          if (Instruction *operand = GetCmpNullOperand(currInst)) {
+            errs() << "***********************Has Path to " << *operand << "\n";
+            if (HasPath(AnalyzerMap::ForwardDependencyMap, malloc, operand)) {
+              auto* nullCmpBr = dyn_cast<BranchInst>(currInst->getNextNonDebugInstruction());
+              errs() << "*********************************Found NULL cmp\n";
+              ICmpInst::Predicate predicate = iCmp->getPredicate();
+
+              auto *trueBr = nullCmpBr->getSuccessor(0);
+              if (predicate == CmpInst::ICMP_EQ) {
+                startOfPathWithNullValue = trueBr->getFirstNonPHIOrDbg();
+                errs() << "VAL: " << *startOfPathWithNullValue << "\n";
+                errs() << "*********************************NULL PATH\n";
+                return false;
+              }
+              if (nullCmpBr->isConditional() && nullCmpBr->getNumSuccessors() == 2) {
+                auto *falseBr = nullCmpBr->getSuccessor(1);
+                if (falseBr->getFirstNonPHIOrDbg() == trueBr->getFirstNonPHIOrDbg()) {
+                  startOfPathWithNullValue = nullptr;
+                  return false;
+                }
+                if (predicate == CmpInst::ICMP_NE) {
+                  startOfPathWithNullValue = falseBr->getFirstNonPHIOrDbg();
+                  errs() << "VAL: " << *startOfPathWithNullValue << "\n";
+                  errs() << "*********************************NULL PATH\n";
+                  return false;
+                }
+              }
+            }
           }
         }
-      }
-    }
-    if (predicate) {
-      auto *trueBr = nullCmpBr->getSuccessor(0);
-      auto *falseBr = nullCmpBr->getSuccessor(1);
-      if ((predicate == CmpInst::ICMP_EQ && currInst->getParent() == trueBr) ||
-          (predicate == CmpInst::ICMP_NE && currInst->getParent() == falseBr)) {
-        return true;
-      }
-    }
+        if (startOfPathWithNullValue && currInst == startOfPathWithNullValue) {
+          errs() << "^^^^^^^^^Malloced instruction value is null. No need free call on this path.\n";
+          startOfPathWithNullValue = nullptr;
+          return true;
+        }
 
+        if (auto *callInst = dyn_cast<CallInst>(currInst)) {
+          if (FunctionCallDeallocation(callInst)) {
+            return true;
+          }
+        }
 
-    if (auto *callInst = dyn_cast<CallInst>(currInst)) {
-      if (FunctionCallDeallocation(callInst)) {
-        return true;
-      }
-    }
+        if (IsCallWithName(currInst, CallInstruction::Free)) {
+          if ((mallocWithOffset && HasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), currInst))
+              || (HasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), currInst))) {
+            errs() << "***********************SUITABLE FREE-------\n";
+            return true;
+          }
+        }
 
-    if (IsCallWithName(currInst, CallInstruction::Free)) {
-      if ((mallocWithOffset && HasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), currInst))
-          || (HasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), currInst))) {
-        return true;
-      }
-    }
-
-    return false;
-  };
+        return false;
+      };
 
   errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
 
-  DFSContext context{AnalyzerMap::ForwardFlowMap, start, options};
+  DFSContext context{AnalyzerMap::ForwardFlowMap, malloc, options};
   DFSResult result = DFS(context);
+
+  bool deallocated = false;
+  for (auto &st : result.funcsStats) {
+    if (!st.second) {
+      deallocated = true;
+    }
+    errs() << st.first << ": " << st.second << "\n";
+  }
 
   if (!result.status) {
     return {};
@@ -340,6 +373,12 @@ std::pair<Value *, Instruction *> MLChecker::FindMemleak(Instruction *malloc) {
 
   std::vector<Value *> path = result.path;
   ProcessTermInstOfPath(path);
+
+  errs() << "------------------------------------\n";
+  for (auto *e : path) {
+    errs() << "\t" << *e << "\n";
+  }
+  errs() << "------------------------------------\n";
 
   auto *endInst = dyn_cast<Instruction>(path.back());
   if (mallocWithOffset) {

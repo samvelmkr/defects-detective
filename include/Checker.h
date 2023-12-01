@@ -18,10 +18,12 @@ struct DFSContext {
 
 struct DFSResult {
   bool status = false;
+  std::unordered_map<std::string, bool> funcsStats = {};
   std::vector<Value *> path;
-  void combine(const DFSResult &other) {
+  void combine(const DFSResult &other, const std::string& funcName) {
     path.insert(path.end(), other.path.begin(), other.path.end());
     status = status || other.status;
+    funcsStats[funcName] = other.status;
   }
 };
 
