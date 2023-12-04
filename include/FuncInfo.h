@@ -2,6 +2,7 @@
 #define ANALYZER_SRC_FUNCINFO_H
 
 #include "llvm/IR/Module.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Instructions.h"
@@ -169,6 +170,8 @@ private:
   std::unordered_map<Value *, std::unordered_set<Value *>> forwardFlowMap;
   std::unordered_map<Value *, std::unordered_set<Value *>> backwardFlowMap;
 
+  std::unordered_map<BasicBlock *, std::unordered_set<BasicBlock *>> bbCFG;
+
   std::shared_ptr<LoopsInfo> loopInfo = {nullptr};
 
   void CollectCalls(Instruction *callInst);
@@ -186,6 +189,8 @@ private:
 
   void CreateEdgesInBB(BasicBlock *bb);
   void ConstructFlowDeps();
+
+  void CreateBBCFG();
 
   bool DFS(AnalyzerMap mapID,
            Instruction *start,
@@ -217,6 +222,7 @@ public:
   std::shared_ptr<LoopsInfo> GetLoopInfo();
   void SetLoopRange(std::pair<int64_t, int64_t> range);
 
+  void printBBCFG();
 
 //  void CollectPaths(Instruction *from, Instruction *to,
 //                    std::vector<std::vector<Instruction *>> &allPaths);

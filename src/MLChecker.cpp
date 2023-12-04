@@ -275,97 +275,148 @@ std::pair<Value *, Instruction *> MLChecker::FindMemleak(Instruction *malloc) {
   funcInfo->printMap(AnalyzerMap::ForwardDependencyMap);
   errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`\n";
 
-  options.terminationCondition = [&end](Value *curr) {
+  std::vector<std::pair<BasicBlock *, BasicBlock *>> nullValueEdge;
+  bool deallocated = false;
+
+  options.continueCondition = [malloc, this, &funcInfo,
+      &mallocWithOffset, &nullValueEdge,
+      &end, &deallocated](Value *curr) {
     if (!isa<Instruction>(curr)) {
       return false;
     }
     auto *currInst = dyn_cast<Instruction>(curr);
 
+    const BasicBlock &lastBB = *(--(currInst->getFunction()->end()));
+    Instruction *ret = const_cast<Instruction *>(&*(--(lastBB.end())));
+    if (currInst == ret) { // && ret != end) {
+
+      // reached end of main
+      if (ret == end) {
+        if (deallocated) {
+            return false;
+        }
+      }
+
+      errs() << "-----AAAA---------------------\n";
+      for (auto *e : tmpPath) {
+        errs() << *e << "\n";
+      }
+      errs() << "-----BVBB---------------------\n";
+
+      if (tmpPath.size() >= 2) {
+        errs() << "Check " << *tmpPath.rbegin()[1] << " , " << *tmpPath.back() << " | curr " << *currInst << "\n";
+        auto *previous = dyn_cast<Instruction>(tmpPath.rbegin()[1]);
+
+        for (auto &nullEdge : nullValueEdge) {
+          if (previous->getParent() == nullEdge.first &&
+              currInst->getParent() == nullEdge.second) {
+            errs() << "^^^^^^^^^Malloced instruction value is null. No need free call on this path.\n";
+            errs() << *previous << " --null-> " << *currInst << "\n";
+            deallocated = true;
+            return true;
+          }
+        }
+      }
+    }
+
+    // Malloced instruction value is null. No need free call on this path.
+    if (auto *iCmp = dyn_cast<ICmpInst>(currInst)) {
+      errs() << "***********************GetCmpNullOperand\n";
+      if (Instruction *operand = GetCmpNullOperand(currInst)) {
+        errs() << "***********************Has Path to " << *operand << "\n";
+        if (HasPath(AnalyzerMap::ForwardDependencyMap, malloc, operand)) {
+          auto *nullCmpBr = dyn_cast<BranchInst>(currInst->getNextNonDebugInstruction());
+          errs() << "*********************************Found NULL cmp\n";
+          ICmpInst::Predicate predicate = iCmp->getPredicate();
+          BasicBlock *nullEdgeFrom = currInst->getParent();
+          BasicBlock *nullEdgeTo = nullptr;
+
+          auto *trueBr = nullCmpBr->getSuccessor(0);
+          if (predicate == CmpInst::ICMP_EQ) {
+            nullEdgeTo = trueBr;
+            errs() << "VAL: " << *nullEdgeTo->getFirstNonPHIOrDbg() << "\n";
+            errs() << *nullEdgeFrom->getTerminator() << " --null-> " << *nullEdgeTo->getFirstNonPHIOrDbg() << "\n";
+            errs() << "*********************************NULL PATH\n";
+            nullValueEdge.emplace_back(nullEdgeFrom, nullEdgeTo);
+            return false;
+          }
+          if (nullCmpBr->isConditional() && nullCmpBr->getNumSuccessors() == 2) {
+            auto *falseBr = nullCmpBr->getSuccessor(1);
+            if (predicate == CmpInst::ICMP_NE) {
+              nullEdgeTo = falseBr;
+              errs() << "VAL: " << *nullEdgeTo->getFirstNonPHIOrDbg() << "\n";
+              errs() << *nullEdgeFrom->getTerminator() << " --null-> " << *nullEdgeTo->getFirstNonPHIOrDbg() << "\n";
+              errs() << "*********************************NULL PATH\n";
+              nullValueEdge.emplace_back(nullEdgeFrom, nullEdgeTo);
+              return false;
+            }
+          }
+        }
+      }
+    }
+
+    if (tmpPath.size() >= 2) {
+      errs() << "Check " << *tmpPath.rbegin()[1] << " , " << *tmpPath.back() << " | curr " << *currInst << "\n";
+      auto *previous = dyn_cast<Instruction>(tmpPath.rbegin()[1]);
+
+      for (auto &nullEdge : nullValueEdge) {
+        if (previous->getParent() == nullEdge.first &&
+            currInst->getParent() == nullEdge.second) {
+          errs() << "^^^^^^^^^Malloced instruction value is null. No need free call on this path.\n";
+          errs() << *previous << " --null-> " << *currInst << "\n";
+          return true;
+        }
+      }
+    }
+
+    if (auto *callInst = dyn_cast<CallInst>(currInst)) {
+      if (FunctionCallDeallocation(callInst)) {
+        deallocated = true;
+        return true;
+      }
+    }
+
+    if (IsCallWithName(currInst, CallInstruction::Free)) {
+      if ((mallocWithOffset && HasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), currInst))
+          || (HasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), currInst))) {
+        errs() << "***********************SUITABLE FREE-------\n";
+        deallocated = true;
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  options.terminationCondition = [&end, this, &deallocated](Value *curr) {
+    if (!isa<Instruction>(curr)) {
+      return false;
+    }
+    auto *currInst = dyn_cast<Instruction>(curr);
+
+    const BasicBlock &lastBB = *(--(currInst->getFunction()->end()));
+    Instruction *ret = const_cast<Instruction *>(&*(--(lastBB.end())));
     if (currInst == end) {
+      if (deallocated) {
+        return false;
+      }
       return true;
     }
 
     return false;
   };
 
-  bool pathWithNull = false;
-  Instruction *startOfPathWithNullValue = nullptr;
-
-  options.continueCondition =
-      [malloc, this, &funcInfo, &mallocWithOffset, &startOfPathWithNullValue, &pathWithNull](Value *curr) {
-        if (!isa<Instruction>(curr)) {
-          return false;
-        }
-        auto *currInst = dyn_cast<Instruction>(curr);
-
-        // Malloced instruction value is null. No need free call on this path.
-        if (auto *iCmp = dyn_cast<ICmpInst>(currInst)) {
-          errs() << "***********************GetCmpNullOperand\n";
-          if (Instruction *operand = GetCmpNullOperand(currInst)) {
-            errs() << "***********************Has Path to " << *operand << "\n";
-            if (HasPath(AnalyzerMap::ForwardDependencyMap, malloc, operand)) {
-              auto* nullCmpBr = dyn_cast<BranchInst>(currInst->getNextNonDebugInstruction());
-              errs() << "*********************************Found NULL cmp\n";
-              ICmpInst::Predicate predicate = iCmp->getPredicate();
-
-              auto *trueBr = nullCmpBr->getSuccessor(0);
-              if (predicate == CmpInst::ICMP_EQ) {
-                startOfPathWithNullValue = trueBr->getFirstNonPHIOrDbg();
-                errs() << "VAL: " << *startOfPathWithNullValue << "\n";
-                errs() << "*********************************NULL PATH\n";
-                return false;
-              }
-              if (nullCmpBr->isConditional() && nullCmpBr->getNumSuccessors() == 2) {
-                auto *falseBr = nullCmpBr->getSuccessor(1);
-                if (falseBr->getFirstNonPHIOrDbg() == trueBr->getFirstNonPHIOrDbg()) {
-                  startOfPathWithNullValue = nullptr;
-                  return false;
-                }
-                if (predicate == CmpInst::ICMP_NE) {
-                  startOfPathWithNullValue = falseBr->getFirstNonPHIOrDbg();
-                  errs() << "VAL: " << *startOfPathWithNullValue << "\n";
-                  errs() << "*********************************NULL PATH\n";
-                  return false;
-                }
-              }
-            }
-          }
-        }
-        if (startOfPathWithNullValue && currInst == startOfPathWithNullValue) {
-          errs() << "^^^^^^^^^Malloced instruction value is null. No need free call on this path.\n";
-          startOfPathWithNullValue = nullptr;
-          return true;
-        }
-
-        if (auto *callInst = dyn_cast<CallInst>(currInst)) {
-          if (FunctionCallDeallocation(callInst)) {
-            return true;
-          }
-        }
-
-        if (IsCallWithName(currInst, CallInstruction::Free)) {
-          if ((mallocWithOffset && HasMallocFreePathWithOffset(funcInfo->mallocedObjs[malloc].get(), currInst))
-              || (HasMallocFreePath(funcInfo->mallocedObjs[malloc].get(), currInst))) {
-            errs() << "***********************SUITABLE FREE-------\n";
-            return true;
-          }
-        }
-
-        return false;
-      };
-
-  errs() << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+  errs()
+      << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
 
   DFSContext context{AnalyzerMap::ForwardFlowMap, malloc, options};
   DFSResult result = DFS(context);
 
-  bool deallocated = false;
   for (auto &st : result.funcsStats) {
-    if (!st.second) {
-      deallocated = true;
-    }
     errs() << st.first << ": " << st.second << "\n";
   }
+
+  errs() << "Is deallocated-" << deallocated << "\n";
 
   if (!result.status) {
     return {};
@@ -374,21 +425,29 @@ std::pair<Value *, Instruction *> MLChecker::FindMemleak(Instruction *malloc) {
   std::vector<Value *> path = result.path;
   ProcessTermInstOfPath(path);
 
-  errs() << "------------------------------------\n";
-  for (auto *e : path) {
-    errs() << "\t" << *e << "\n";
+  errs()
+      << "------------------------------------\n";
+  for (
+    auto *e
+      : path) {
+    errs()
+        << "\t" << *e << "\n";
   }
-  errs() << "------------------------------------\n";
+  errs()
+      << "------------------------------------\n";
 
   auto *endInst = dyn_cast<Instruction>(path.back());
   if (mallocWithOffset) {
     MallocedObject *main = funcInfo->mallocedObjs[malloc]->getMainObj();
-    if (main->isDeallocated()) {
-      // FIXME: take free corresponding to path
+    if (main->
+        isDeallocated()
+        ) {
+// FIXME: take free corresponding to path
       endInst = main->getFreeCalls().front();
     }
   }
-  return {malloc, endInst};
+  return {
+      malloc, endInst};
 
 }
 

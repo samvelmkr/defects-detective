@@ -48,6 +48,7 @@ private:
 protected:
   std::unordered_map<Function *, std::shared_ptr<FuncInfo>> funcInfos;
   bool IsLibraryFunction(Value *inst);
+  std::vector<Value*> tmpPath;
 
 public:
 

@@ -180,7 +180,8 @@ bool FuncInfo::ProcessStoreInsts(Instruction *storeInst) {
 bool FuncInfo::ProcessGepInsts(Instruction *gInst) {
   auto *gepInst = dyn_cast<GetElementPtrInst>(gInst);
   auto *firstOp = dyn_cast<Instruction>(gepInst->getOperand(0));
-
+  errs() << *gepInst << " - gep\n";
+  errs() << *firstOp << "\n";
   // TODO: check this later
   if (backwardDependencyMap.find(firstOp) == backwardDependencyMap.end()) {
     return false;
@@ -208,6 +209,7 @@ void FuncInfo::UpdateDataDeps() {
   }
 
   for (Instruction *mallocInst : callInstructions.at(CallInstruction::Malloc)) {
+    errs() << "process " << *mallocInst << "\n";
     for (auto &dependentVal : forwardDependencyMap[mallocInst]) {
       auto *dependentInst = dyn_cast<Instruction>(dependentVal);
       if (dependentInst->getOpcode() == Instruction::GetElementPtr) {
@@ -218,14 +220,17 @@ void FuncInfo::UpdateDataDeps() {
 }
 
 void FuncInfo::CollectMallocedObjs() {
+  errs() << "}}}}}}}\n";
   if (callInstructions.empty() ||
       callInstructions.find(CallInstruction::Malloc) == callInstructions.end()) {
     return;
   }
+  errs() << "}}}}}}}\n";
 
   for (Instruction *mallocInst : callInstructions[CallInstruction::Malloc]) {
     DFS(AnalyzerMap::ForwardDependencyMap, mallocInst, [mallocInst, this](Value *current) {
       auto *currentInst = dyn_cast<Instruction>(current);
+      errs() << "curr: " << *currentInst << "\n";
       if (currentInst->getOpcode() == Instruction::Alloca) {
         auto obj = std::make_shared<MallocedObject>(currentInst);
         obj->setMallocCall(mallocInst);
@@ -233,15 +238,35 @@ void FuncInfo::CollectMallocedObjs() {
         return true;
       }
       if (currentInst->getOpcode() == Instruction::GetElementPtr) {
+        errs() << "MMM\n";
         auto obj = std::make_shared<MallocedObject>(currentInst);
+        errs() << "MMM\n";
+
         obj->setMallocCall(mallocInst);
+        errs() << "MMM\n";
+
         auto *gep = dyn_cast<GetElementPtrInst>(currentInst);
+        errs() << "MMM\n";
+
         size_t offset = CalculateOffsetInBits(gep);
+        errs() << "MMM\n";
+
+        printMap(AnalyzerMap::ForwardDependencyMap);
+
+        if (forwardDependencyMap.find(current) == forwardDependencyMap.end()) {
+          errs() << "lav ches\n";
+        }
 
         // nextInst = parentInst. Alloca is the next to gep, see updateDependencies()
         auto *next = dyn_cast<Instruction>(*(forwardDependencyMap[current].begin()));
+        errs() << "MMM\n";
+
         obj->setOffset(FindSuitableObj(next), offset);
+
+        errs() << "MMM\n";
         mallocedObjs[mallocInst] = obj;
+        errs() << "MMM\n";
+
         return true;
       }
       return false;
@@ -311,11 +336,19 @@ FuncInfo::FuncInfo(llvm::Function *func) {
   if (!lastBB.empty()) {
     ret = const_cast<Instruction *>(&*(--(lastBB.end())));
   }
-
+  errs() << "EEEEE\n";
   ConstructDataDeps();
+  errs() << "EEEEE\n";
+
   CollectMallocedObjs();
+  errs() << "EEEEE\n";
+
   ConstructFlowDeps();
+  errs() << "EEEEE\n";
+
   DetectLoops();
+  errs() << "EEEEE\n";
+
 }
 
 MallocedObject *FuncInfo::FindSuitableObj(Instruction *base) {
@@ -500,6 +533,29 @@ void FuncInfo::SetLoopRange(std::pair<int64_t, int64_t> range) {
     --range.second;
   }
   loopInfo->SetRange(range);
+}
+
+void FuncInfo::CreateBBCFG() {
+  for (BasicBlock &BB : *function) {
+    bbCFG[&BB]; // This will initialize an empty set for the basic block
+
+    for (BasicBlock *Successor : successors(&BB)) {
+      bbCFG[&BB].insert(Successor);
+    }
+  }
+}
+
+void FuncInfo::printBBCFG() {
+
+  for (auto &pair : bbCFG) {
+    BasicBlock *to = pair.first;
+    std::unordered_set<BasicBlock *> successors = pair.second;
+
+    for (BasicBlock *successor : successors) {
+      errs() << *to << "-->" << *successor << "\n";
+//      outs() << Successor->getName() << " ";
+    }
+  }
 }
 
 //void FuncInfo::DetectLoopsUtil(Value *u, std::unordered_set<Value *> &discovered,

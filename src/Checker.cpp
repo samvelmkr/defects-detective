@@ -36,6 +36,7 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
     dfsStack.pop();
 
     result.path.push_back(current);
+    tmpPath = result.path;
     visitedNodes.insert(current);
 
     errs() << "-----111---------------------\n";
@@ -48,15 +49,6 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
 //    }
 //    errs() << " }\n";
     errs() << "--------------------------\n";
-
-    if (context.options.terminationCondition &&
-        context.options.terminationCondition(current)) {
-      errs() << "***************************TERM***************************\n";
-
-      result.status = true;
-      result.funcsStats[function->getName().str()] = result.status;
-      return result;
-    }
 
     if (context.options.continueCondition &&
         context.options.continueCondition(current)) {
@@ -73,10 +65,21 @@ DFSResult Checker::DFSTraverse(Function *function, const DFSContext &context,
           }
         }
       }
-
+      tmpPath = result.path;
       errs() << "CONTINUE\n";
       continue;
     }
+
+    if (context.options.terminationCondition &&
+        context.options.terminationCondition(current)) {
+      errs() << "***************************TERM***************************\n";
+
+      result.status = true;
+      result.funcsStats[function->getName().str()] = result.status;
+      return result;
+    }
+
+
 
     if (map->operator[](current).empty()) {
       // change path
